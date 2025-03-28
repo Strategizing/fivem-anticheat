@@ -11,8 +11,8 @@ if not GetGameTimer then
         -- Try different ways to get tick count
         if type(GetTickCount64) == "function" then
             return GetTickCount64()
-        elseif type(GetTickCount) == "function" then
-            return GetTickCount()
+        elseif type(_G["GetTickCount"]) == "function" then
+            return _G["GetTickCount"]()
         else
             return os.clock() * 1000 -- Fallback to Lua's os.clock (in seconds) converted to ms
         end
@@ -233,7 +233,7 @@ function DetectWeaponModification()
     local weaponHash = GetSelectedPedWeapon(ped)
     
     if weaponHash ~= GetHashKey("WEAPON_UNARMED") then
-        local damage = GetWeaponDamage(weaponHash)
+        local damage = GetWeaponDamage(weaponHash, 0)
         local clipSize = GetWeaponClipSize(weaponHash)
         
         -- Store weapon stats if not yet recorded
@@ -309,13 +309,14 @@ function DetectNoClip()
     -- Only check if player is not in a vehicle and not dead
     if GetVehiclePedIsIn(ped, false) == 0 and not IsEntityDead(ped) then
         local pos = GetEntityCoords(ped)
-        local ground, groundZ = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z, 0)
+        local ground, groundZ = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z, false)
         
         -- Check if player is floating and not falling
         if not ground and not IsPedInParachuteFreeFall(ped) and not IsPedFalling(ped) and not IsPedJumpingOutOfVehicle(ped) then
-            local _, zSpeed = GetEntityVelocity(ped)
+            local _, _, zSpeed = GetEntityVelocity(ped)
             
             -- If player is floating and not moving vertically (not falling)
+            zSpeed = zSpeed or 0  -- Default to 0 if zSpeed is nil
             if math.abs(zSpeed) < 0.1 then
                 local entFlags = GetEntityCollisionDisabled(ped)
                 if entFlags then -- If collision is disabled
