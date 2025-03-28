@@ -12,6 +12,17 @@ function NetworkIsSessionActive() return true end
 function GetCurrentResourceName() return "fivem-anticheat" end
 function GetNumResources() return 10 end
 function GetResourceByFindIndex(i) return "resource_" .. i end
+function GetPedMaxHealth(ped) return 200 end
+function GetPlayerInvincible() return false end
+function IsEntityDead() return false end
+function GetEntityVelocity() return 0, 0, 0 end
+function GetEntityCollisionDisabled() return false end
+function IsPedInParachuteFreeFall() return false end
+function IsPedFalling() return false end
+function IsPedJumpingOutOfVehicle() return false end
+function IsPlayerSwitchInProgress() return false end
+function IsScreenFadedOut() return false end
+function GetGroundZFor_3dCoord() return true, 0 end
 
 -- Citizen namespace
 Citizen = {

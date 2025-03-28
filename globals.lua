@@ -16,6 +16,23 @@ AC.config = {
     logLevel = 2, -- 0: None, 1: Critical, 2: Normal, 3: Debug
 }
 
+-- Add this after the AC initialization section
+AC.Commands = {}
+
+-- Add this function
+AC.Commands.RegisterCommand = function(name, options, callback)
+    if not AC.commands then AC.commands = {} end
+    AC.commands[name] = {
+        name = name,
+        description = options.description or "",
+        usage = options.usage or "",
+        permission = options.permission or "user",
+        handler = callback
+    }
+    AC.utils.log("Registered command: " .. name, 3)
+    return AC.commands[name]
+end
+
 -- Detection types
 AC.detectionTypes = {
     SPEEDHACK = 1,
@@ -68,28 +85,28 @@ if not _G.NexusGuard then
 end
 
 -- Ban list related functions
-function LoadBanList()
+AC.LoadBanList = function()
     local banListJson = LoadResourceFile(GetCurrentResourceName(), "data/banlist.json")
     if banListJson then
-        BanList = json.decode(banListJson) or {}
-        AC.utils.log("Loaded " .. #BanList .. " bans from database", 2)
+        AC.banList = json.decode(banListJson) or {}
+        AC.utils.log("Loaded " .. #AC.banList .. " bans from database", 2)
     else
-        BanList = {}
+        AC.banList = {}
         AC.utils.log("No existing ban list found, creating new one", 2)
-        SaveBanList()
+        AC.SaveBanList()
     end
 end
 
-function SaveBanList()
-    local banListJson = json.encode(BanList)
+AC.SaveBanList = function()
+    local banListJson = json.encode(AC.banList)
     SaveResourceFile(GetCurrentResourceName(), "data/banlist.json", banListJson, -1)
-    AC.utils.log("Ban list saved with " .. #BanList .. " entries", 3)
+    AC.utils.log("Ban list saved with " .. #AC.banList .. " entries", 3)
 end
 
 function IsPlayerBanned(license, ip)
-    if not BanList then return false end
+    if not AC.banList then return false end
     
-    for _, ban in ipairs(BanList) do
+    for _, ban in ipairs(AC.banList) do
         for _, identifier in ipairs(ban.identifiers or {}) do
             if identifier == license or identifier == "ip:" .. ip then
                 return true
@@ -412,3 +429,9 @@ exports('getNexusGuardAPI', function()
         sendToDiscord = SendToDiscord
     }
 end)
+
+function SafeGetPlayers()
+    if not GetPlayers then return {} end
+    local players = GetPlayers()
+    return type(players) == "table" and players or {}
+end

@@ -7,12 +7,26 @@ local PlayerMetrics = {}
 local AIModelCache = {}
 local ClientsLoaded = {}
 
+-- Add this after loading configs
+function ValidateConfig()
+    -- Ensure core config sections exist
+    if not Config.AI then Config.AI = {enabled = false} end
+    if not Config.Actions then Config.Actions = {} end
+    if not Config.ScreenCapture then Config.ScreenCapture = {enabled = false} end
+    if not Config.Database then Config.Database = {enabled = false, historyDuration = 30} end
+    if not Config.Thresholds then Config.Thresholds = {aiDecisionConfidenceThreshold = 0.75} end
+    
+    -- Log configuration status
+    print('^2[NexusGuard]^7 Configuration validated')
+end
+
 -- Initialize the anti-cheat
 AddEventHandler('onResourceStart', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
     
     print('^2[NexusGuard]^7 Initializing advanced anti-cheat system...')
     LoadBanList()
+    ValidateConfig() -- Add this line
     InitializeAIModels()
     SetupScheduledTasks()
     
@@ -348,13 +362,25 @@ function RegisterServerEvents()
     -- Add event handlers for weapon damage, player movement, etc.
 end
 
+-- Fix potential nil access in HandleExplosionEvent
+function HandleExplosionEvent(sender, ev)
+    -- Check for explosion spam or illegal explosions
+    if not ev or not sender or not PlayerMetrics[sender] then return end
+    
+    local explosionType = ev.explosionType
+    local position = vector3(ev.posX, ev.posY, ev.posZ)
+    
+    -- Rest of function unchanged
+end
+
 -- Send notification to online admins
 function NotifyAdmins(playerId, detectionType, detectionData)
     local playerName = GetPlayerName(playerId)
     local message = '^1[NexusGuard]^7 Detection: ' .. playerName .. ' - ' .. detectionType
     
     -- Send to all admins
-    for _, adminId in ipairs(GetPlayers()) do
+    local players = GetPlayers() or {}
+    for _, adminId in ipairs(players) do
         if IsPlayerAdmin(adminId) then
             local adminIdNum = tonumber(adminId)
             if adminIdNum then -- Make sure we have a valid number

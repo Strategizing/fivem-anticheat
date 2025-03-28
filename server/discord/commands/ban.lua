@@ -51,16 +51,23 @@ AC.Commands.RegisterCommand('ban', {
     end
 
     -- Check if player is online
-local players = GetPlayers() or {}  -- Ensure we have a table, not nil
-local playerName = "Unknown"
-local found = false
-for _, playerId in ipairs(players) do
-    if tonumber(playerId) == playerID then
-        playerName = GetPlayerName(playerId) or playerName
-        found = true
-        break
+    local players = nil
+    if GetPlayers then
+        players = GetPlayers()
     end
-end
+    if type(players) ~= "table" then
+        players = {}
+    end
+
+    local playerName = "Unknown"
+    local found = false
+    for _, playerId in ipairs(players) do
+        if tonumber(playerId) == playerID then
+            playerName = GetPlayerName(playerId) or playerName
+            found = true
+            break
+        end
+    end
 
     if not found then
         return "Player not found."

@@ -323,8 +323,8 @@ function ReportCheat(type, details)
         
         TriggerEvent("NexusGuard:CheatWarning", type, details)
     else
-        -- Subsequent detections report to server
-        TriggerServerEvent("NexusGuard:ReportCheat", type, details, NexusGuard.securityToken)
+        -- Use the same event name the server is listening for
+        TriggerServerEvent("nexusguard:detection", type, details, NexusGuard.securityToken)
     end
 end
 
