@@ -79,47 +79,6 @@ Citizen.CreateThread(function()
     NexusGuard.initialized = true
 end)
 
--- Initialize Discord Rich Presence
-function InitializeDiscordRichPresence()
-    if not Config or not Config.Discord or not Config.Discord.RichPresence then
-        -- If Config isn't loaded yet, try again in a moment
-        Citizen.SetTimeout(1000, InitializeDiscordRichPresence)
-        return
-    end
-    
-    NexusGuard.discordRichPresence.appId = Config.Discord.RichPresence.AppId
-    NexusGuard.discordRichPresence.serverName = GetConvar("sv_hostname", "Protected Server")
-    
-    if NexusGuard.discordRichPresence.appId and NexusGuard.discordRichPresence.appId ~= '' then
-        SetDiscordAppId(NexusGuard.discordRichPresence.appId)
-        SetDiscordRichPresenceAsset(Config.Discord.RichPresence.LargeImage or 'logo')
-        SetDiscordRichPresenceAssetText(Config.Discord.RichPresence.LargeImageText or NexusGuard.discordRichPresence.serverName)
-        
-        -- Update Discord status periodically
-        Citizen.CreateThread(function()
-            while true do
-                local player = PlayerId()
-                local playerName = GetPlayerName(player)
-                local serverId = GetPlayerServerId(player)
-                
-                -- Set the rich presence details
-                SetRichPresence(playerName .. " [ID: " .. serverId .. "] - " .. NexusGuard.discordRichPresence.serverName)
-                
-                -- Set the party info
-                SetDiscordRichPresenceAction(0, "Join Server", "fivem://connect/" .. GetConvar("sv_hostname", "yourserver.com"))
-                SetDiscordRichPresenceAction(1, "Discord", Config.Discord.inviteLink or "https://discord.gg/yourserver")
-                
-                NexusGuard.discordRichPresence.lastUpdate = GetGameTimer()
-                Citizen.Wait(NexusGuard.discordRichPresence.updateInterval)
-            end
-        end)
-        
-        print('[NexusGuard] Discord Rich Presence initialized')
-    else
-        print('[NexusGuard] Discord Rich Presence not configured, skipping')
-    end
-end
-
 -- Start all protection modules based on scan intervals
 function StartProtectionModules()
     -- Load configuration
@@ -198,8 +157,7 @@ function StartProtectionModules()
         Citizen.SetTimeout(1000, StartProtectionModules)
     end
     
-    -- Initialize Discord Rich Presence
-    InitializeDiscordRichPresence()
+    InitializeRichPresence() -- Replaces the old InitializeDiscordRichPresence call
     
     print('[NexusGuard] Protection modules initialized')
 end
