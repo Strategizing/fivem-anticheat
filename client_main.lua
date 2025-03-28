@@ -44,15 +44,20 @@ local NexusGuard = {
         warningIssued = false
     },
     discordRichPresence = {
-        appId = "1234567890123456", -- Replace with your Discord application ID
+        appId = nil, -- Will be populated from Config
         updateInterval = 60000,     -- Update Discord status every 60 seconds
-        serverName = "Your Server Name",
+        serverName = "Protected Server",
         lastUpdate = 0
-    }
+    },
+    initialized = false
 }
 
 -- Initialize client-side anti-cheat
 Citizen.CreateThread(function()
+    -- Wait for the resource's scripts to load
+    Citizen.Wait(1000)
+    
+    -- Wait for network session to be active
     while not NetworkIsSessionActive() do
         Citizen.Wait(100)
     end
@@ -65,100 +70,144 @@ Citizen.CreateThread(function()
     -- Request security token from server
     TriggerServerEvent('NexusGuard:RequestSecurityToken', clientHash)
     
-    -- Initialize Discord Rich Presence
-    InitializeDiscordRichPresence()
+    -- Initialize anti-cheat after a short delay
+    Citizen.Wait(2000)
     
     -- Start all protection modules
     StartProtectionModules()
+    
+    NexusGuard.initialized = true
 end)
 
 -- Initialize Discord Rich Presence
 function InitializeDiscordRichPresence()
-    SetDiscordAppId(NexusGuard.discordRichPresence.appId)
-    SetDiscordRichPresenceAsset('logo')
-    SetDiscordRichPresenceAssetText(NexusGuard.discordRichPresence.serverName)
+    if not Config or not Config.Discord or not Config.Discord.RichPresence then
+        -- If Config isn't loaded yet, try again in a moment
+        Citizen.SetTimeout(1000, InitializeDiscordRichPresence)
+        return
+    end
     
-    -- Update Discord status periodically
-    Citizen.CreateThread(function()
-        while true do
-            local player = PlayerId()
-            local playerName = GetPlayerName(player)
-            local serverId = GetPlayerServerId(player)
-            
-            -- Set the rich presence details
-            SetRichPresence(playerName .. " [ID: " .. serverId .. "] - " .. NexusGuard.discordRichPresence.serverName)
-            
-            -- Set the party info
-            SetDiscordRichPresenceAction(0, "Join Server", "fivem://connect/yourserver.com")
-            SetDiscordRichPresenceAction(1, "Discord", "https://discord.gg/yourserver")
-            
-            NexusGuard.discordRichPresence.lastUpdate = GetGameTimer()
-            Citizen.Wait(NexusGuard.discordRichPresence.updateInterval)
-        end
-    end)
+    NexusGuard.discordRichPresence.appId = Config.Discord.RichPresence.AppId
+    NexusGuard.discordRichPresence.serverName = GetConvar("sv_hostname", "Protected Server")
+    
+    if NexusGuard.discordRichPresence.appId and NexusGuard.discordRichPresence.appId ~= '' then
+        SetDiscordAppId(NexusGuard.discordRichPresence.appId)
+        SetDiscordRichPresenceAsset(Config.Discord.RichPresence.LargeImage or 'logo')
+        SetDiscordRichPresenceAssetText(Config.Discord.RichPresence.LargeImageText or NexusGuard.discordRichPresence.serverName)
+        
+        -- Update Discord status periodically
+        Citizen.CreateThread(function()
+            while true do
+                local player = PlayerId()
+                local playerName = GetPlayerName(player)
+                local serverId = GetPlayerServerId(player)
+                
+                -- Set the rich presence details
+                SetRichPresence(playerName .. " [ID: " .. serverId .. "] - " .. NexusGuard.discordRichPresence.serverName)
+                
+                -- Set the party info
+                SetDiscordRichPresenceAction(0, "Join Server", "fivem://connect/" .. GetConvar("sv_hostname", "yourserver.com"))
+                SetDiscordRichPresenceAction(1, "Discord", Config.Discord.inviteLink or "https://discord.gg/yourserver")
+                
+                NexusGuard.discordRichPresence.lastUpdate = GetGameTimer()
+                Citizen.Wait(NexusGuard.discordRichPresence.updateInterval)
+            end
+        end)
+        
+        print('[NexusGuard] Discord Rich Presence initialized')
+    else
+        print('[NexusGuard] Discord Rich Presence not configured, skipping')
+    end
 end
 
 -- Start all protection modules based on scan intervals
 function StartProtectionModules()
-    -- God Mode Detection
-    Citizen.CreateThread(function()
-        while true do
-            DetectGodMode()
-            Citizen.Wait(NexusGuard.scanIntervals.godMode)
+    -- Load configuration
+    if Config and Config.Detectors then
+        -- God Mode Detection
+        if Config.Detectors.godMode then
+            Citizen.CreateThread(function()
+                while true do
+                    DetectGodMode()
+                    Citizen.Wait(NexusGuard.scanIntervals.godMode)
+                end
+            end)
         end
-    end)
+        
+        -- Weapon Modification Detection
+        if Config.Detectors.weaponModification then
+            Citizen.CreateThread(function()
+                while true do
+                    DetectWeaponModification()
+                    Citizen.Wait(NexusGuard.scanIntervals.weaponModification)
+                end
+            end)
+        end
+        
+        -- Speed Hack Detection
+        if Config.Detectors.speedHack then
+            Citizen.CreateThread(function()
+                while true do
+                    DetectSpeedHack()
+                    Citizen.Wait(NexusGuard.scanIntervals.speedHack)
+                end
+            end)
+        end
+        
+        -- Teleport Detection
+        if Config.Detectors.teleporting then
+            Citizen.CreateThread(function()
+                while true do
+                    DetectTeleport()
+                    Citizen.Wait(NexusGuard.scanIntervals.teleport)
+                end
+            end)
+        end
+        
+        -- NoClip Detection
+        if Config.Detectors.noclip then
+            Citizen.CreateThread(function()
+                while true do
+                    DetectNoClip()
+                    Citizen.Wait(NexusGuard.scanIntervals.noclip)
+                end
+            end)
+        end
+        
+        -- Menu Detection
+        if Config.Detectors.menuDetection then
+            Citizen.CreateThread(function()
+                while true do
+                    DetectModMenus()
+                    Citizen.Wait(NexusGuard.scanIntervals.menuDetection)
+                end
+            end)
+        end
+        
+        -- Resource Monitor
+        if Config.Detectors.resourceInjection then
+            Citizen.CreateThread(function()
+                while true do
+                    MonitorResources()
+                    Citizen.Wait(NexusGuard.scanIntervals.resourceMonitor)
+                end
+            end)
+        end
+    else
+        -- If Config isn't loaded yet, try again shortly
+        Citizen.SetTimeout(1000, StartProtectionModules)
+    end
     
-    -- Weapon Modification Detection
-    Citizen.CreateThread(function()
-        while true do
-            DetectWeaponModification()
-            Citizen.Wait(NexusGuard.scanIntervals.weaponModification)
-        end
-    end)
+    -- Initialize Discord Rich Presence
+    InitializeDiscordRichPresence()
     
-    -- Speed Hack Detection
-    Citizen.CreateThread(function()
-        while true do
-            DetectSpeedHack()
-            Citizen.Wait(NexusGuard.scanIntervals.speedHack)
-        end
-    end)
-    
-    -- Teleport Detection
-    Citizen.CreateThread(function()
-        while true do
-            DetectTeleport()
-            Citizen.Wait(NexusGuard.scanIntervals.teleport)
-        end
-    end)
-    
-    -- NoClip Detection
-    Citizen.CreateThread(function()
-        while true do
-            DetectNoClip()
-            Citizen.Wait(NexusGuard.scanIntervals.noclip)
-        end
-    end)
-    
-    -- Menu Detection
-    Citizen.CreateThread(function()
-        while true do
-            DetectModMenus()
-            Citizen.Wait(NexusGuard.scanIntervals.menuDetection)
-        end
-    end)
-    
-    -- Resource Monitor
-    Citizen.CreateThread(function()
-        while true do
-            MonitorResources()
-            Citizen.Wait(NexusGuard.scanIntervals.resourceMonitor)
-        end
-    end)
+    print('[NexusGuard] Protection modules initialized')
 end
 
 -- Detection functions
 function DetectGodMode()
+    if not NexusGuard.initialized then return end
+    
     local player = PlayerId()
     local ped = PlayerPedId()
     local health = GetEntityHealth(ped)
@@ -178,6 +227,8 @@ function DetectGodMode()
 end
 
 function DetectWeaponModification()
+    if not NexusGuard.initialized then return end
+    
     local ped = PlayerPedId()
     local weaponHash = GetSelectedPedWeapon(ped)
     
@@ -205,6 +256,8 @@ function DetectWeaponModification()
 end
 
 function DetectSpeedHack()
+    if not NexusGuard.initialized then return end
+    
     local ped = PlayerPedId()
     local vehicle = GetVehiclePedIsIn(ped, false)
     
@@ -225,6 +278,8 @@ function DetectSpeedHack()
 end
 
 function DetectTeleport()
+    if not NexusGuard.initialized then return end
+    
     local ped = PlayerPedId()
     local currentPos = GetEntityCoords(ped)
     local lastPos = NexusGuard.playerState.position
@@ -247,6 +302,8 @@ function DetectTeleport()
 end
 
 function DetectNoClip()
+    if not NexusGuard.initialized then return end
+    
     local ped = PlayerPedId()
     
     -- Only check if player is not in a vehicle and not dead
@@ -270,6 +327,8 @@ function DetectNoClip()
 end
 
 function DetectModMenus()
+    if not NexusGuard.initialized then return end
+    
     -- Common mod menu natives
     local blacklistedNatives = {
         "GIVE_WEAPON_TO_PED",
@@ -288,6 +347,8 @@ function DetectModMenus()
 end
 
 function MonitorResources()
+    if not NexusGuard.initialized then return end
+    
     -- Get all resources
     local resources = {}
     local resourceCount = GetNumResources()
@@ -303,6 +364,8 @@ end
 
 -- Report detected cheats to the server
 function ReportCheat(type, details)
+    if not NexusGuard.initialized or not NexusGuard.securityToken then return end
+    
     if not NexusGuard.flags.warningIssued then
         -- First detection is just a warning
         NexusGuard.flags.suspiciousActivity = true
@@ -322,6 +385,13 @@ AddEventHandler("NexusGuard:ReceiveSecurityToken", function(token)
     print("[NexusGuard] Security handshake completed")
 end)
 
+-- Also register the server-renamed event for compatibility
+RegisterNetEvent("nexusguard:initializeClient")
+AddEventHandler("nexusguard:initializeClient", function(token)
+    NexusGuard.securityToken = token
+    print("[NexusGuard] Client initialized via alternate event")
+end)
+
 -- Display warning to user
 RegisterNetEvent("NexusGuard:CheatWarning")
 AddEventHandler("NexusGuard:CheatWarning", function(type, details)
@@ -330,4 +400,25 @@ AddEventHandler("NexusGuard:CheatWarning", function(type, details)
         multiline = true,
         args = { "[NexusGuard]", "Suspicious activity detected! Type: " .. type .. ". Further violations will result in automatic ban." }
     })
+end)
+
+-- Screen capture request handler
+RegisterNetEvent("nexusguard:requestScreenshot")
+AddEventHandler("nexusguard:requestScreenshot", function()
+    if not NexusGuard.initialized then return end
+    
+    -- Capture screenshot code would go here
+    -- For example, using screenshot-basic:
+    if exports['screenshot-basic'] then
+        exports['screenshot-basic']:requestScreenshotUpload(
+            Config.ScreenCapture.webhookURL, 
+            'files[]', 
+            function(data)
+                local resp = json.decode(data)
+                if resp and resp.attachments and resp.attachments[1] then
+                    TriggerServerEvent('nexusguard:screenshotTaken', resp.attachments[1].url, NexusGuard.securityToken)
+                end
+            end
+        )
+    end
 end)

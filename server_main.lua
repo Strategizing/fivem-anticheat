@@ -47,7 +47,10 @@ AddEventHandler('playerConnecting', function(playerName, setKickReason, deferral
         movementSamples = {},
         weaponStats = {},
         behaviorProfile = {},
-        trustScore = 100.0
+        trustScore = 100.0,
+        securityToken = nil, -- Added to store security token
+        explosions = {}, -- Added for tracking explosions
+        entities = {}  -- Added for tracking entities
     }
     
     deferrals.done()
@@ -58,7 +61,7 @@ AddEventHandler('playerDropped', function(reason)
     local source = source
     
     -- Save detection data to database if enabled
-    if Config.Database.enabled and PlayerMetrics[source] then
+    if Config.Database and Config.Database.enabled and PlayerMetrics[source] then
         SavePlayerMetrics(source)
     end
     
@@ -75,7 +78,8 @@ AddEventHandler('nexusguard:clientLoaded', function(clientHash)
     -- Verify client hash to ensure the client is running the correct version
     if ValidateClientHash(clientHash) then
         ClientsLoaded[source] = true
-        TriggerClientEvent('nexusguard:initializeClient', source, GenerateSecurityToken(source))
+        local token = GenerateSecurityToken(source)
+        TriggerClientEvent('nexusguard:initializeClient', source, token)
         print('^2[NexusGuard]^7 Client initialized for ' .. GetPlayerName(source))
     else
         -- If client hash is invalid, player might be using a modified client
@@ -83,7 +87,39 @@ AddEventHandler('nexusguard:clientLoaded', function(clientHash)
     end
 end)
 
--- Process detection from client
+-- Register the event that client actually uses based on client_main.lua
+RegisterNetEvent('NexusGuard:RequestSecurityToken')
+AddEventHandler('NexusGuard:RequestSecurityToken', function(clientHash)
+    local source = source
+    
+    -- Verify client hash to ensure the client is running the correct version
+    if ValidateClientHash(clientHash) then
+        ClientsLoaded[source] = true
+        local token = GenerateSecurityToken(source)
+        TriggerClientEvent('NexusGuard:ReceiveSecurityToken', source, token)
+        print('^2[NexusGuard]^7 Security token sent to ' .. GetPlayerName(source))
+    else
+        -- If client hash is invalid, player might be using a modified client
+        BanPlayer(source, 'Modified client detected')
+    end
+end)
+
+-- Register the event that client actually triggers based on client_main.lua
+RegisterNetEvent('NexusGuard:ReportCheat')
+AddEventHandler('NexusGuard:ReportCheat', function(detectionType, detectionData, securityToken)
+    local source = source
+    
+    -- Validate security token to prevent spoofed events
+    if not ValidateSecurityToken(source, securityToken) then
+        BanPlayer(source, 'Invalid security token')
+        return
+    end
+    
+    -- Process the detection
+    ProcessDetection(source, detectionType, detectionData)
+end)
+
+-- Process detection from client (original event registration)
 RegisterNetEvent('nexusguard:detection')
 AddEventHandler('nexusguard:detection', function(detectionType, detectionData, securityToken)
     local source = source
@@ -96,6 +132,15 @@ AddEventHandler('nexusguard:detection', function(detectionType, detectionData, s
     
     -- Process the detection
     ProcessDetection(source, detectionType, detectionData)
+end)
+
+-- Register event for resource verification
+RegisterNetEvent('NexusGuard:VerifyResources')
+AddEventHandler('NexusGuard:VerifyResources', function(resources)
+    local source = source
+    -- Here you would implement resource validation logic
+    -- For now, just log that we received the resources list
+    print('^3[NexusGuard]^7 Received resource list from ' .. GetPlayerName(source) .. ' with ' .. #resources .. ' resources')
 end)
 
 function ProcessDetection(playerId, detectionType, detectionData)
@@ -115,8 +160,8 @@ function ProcessDetection(playerId, detectionType, detectionData)
         PlayerMetrics[playerId].trustScore = math.max(0, PlayerMetrics[playerId].trustScore - severityImpact)
     end
     
-    -- Process with AI if enabled
-    if Config.AI.enabled then
+    -- Make sure we've defined Config.AI first before checking
+    if Config.AI and Config.AI.enabled then
         local aiVerdict = ProcessAIVerification(playerId, detectionType, detectionData)
         
         if aiVerdict.confidence > Config.Thresholds.aiDecisionConfidenceThreshold then
@@ -130,18 +175,21 @@ function ProcessDetection(playerId, detectionType, detectionData)
         end
     end
     
-    -- Handle detection based on configuration
-    if Config.Actions.kickOnSuspicion and IsHighRiskDetection(detectionType, detectionData) then
-        DropPlayer(playerId, Config.KickMessage)
-    elseif Config.Actions.banOnConfirmed and IsConfirmedCheat(detectionType, detectionData) then
-        BanPlayer(playerId, 'Confirmed cheat: ' .. detectionType)
-    elseif Config.ScreenCapture.enabled and Config.ScreenCapture.includeWithReports then
-        TriggerClientEvent('nexusguard:requestScreenshot', playerId)
-    end
-    
-    -- Notify admins
-    if Config.Actions.reportToAdminsOnSuspicion then
-        NotifyAdmins(playerId, detectionType, detectionData)
+    -- Make sure Config.Actions is defined
+    if Config.Actions then
+        -- Handle detection based on configuration
+        if Config.Actions.kickOnSuspicion and IsHighRiskDetection(detectionType, detectionData) then
+            DropPlayer(playerId, Config.KickMessage)
+        elseif Config.Actions.banOnConfirmed and IsConfirmedCheat(detectionType, detectionData) then
+            BanPlayer(playerId, 'Confirmed cheat: ' .. detectionType)
+        elseif Config.ScreenCapture and Config.ScreenCapture.enabled and Config.ScreenCapture.includeWithReports then
+            TriggerClientEvent('nexusguard:requestScreenshot', playerId)
+        end
+        
+        -- Notify admins
+        if Config.Actions.reportToAdminsOnSuspicion then
+            NotifyAdmins(playerId, detectionType, detectionData)
+        end
     end
     
     -- Log to Discord
@@ -181,7 +229,7 @@ function BanPlayer(playerId, reason)
     end
     
     -- Store in database if enabled
-    if Config.Database.enabled then
+    if Config.Database and Config.Database.enabled then
         StorePlayerBan(banData)
     end
 end
@@ -275,7 +323,7 @@ function SetupScheduledTasks()
     end)
     
     -- Update AI models periodically if enabled
-    if Config.AI.enabled then
+    if Config.AI and Config.AI.enabled then
         Citizen.CreateThread(function()
             while true do
                 Citizen.Wait(86400000) -- Daily check
@@ -327,4 +375,21 @@ function NotifyAdmins(playerId, detectionType, detectionData)
     end
 end
 
--- Additional helper functions would be defined below...
+-- Export NexusGuard API for other resources
+exports('BanPlayer', function(playerId, reason, duration, adminId)
+    if not playerId then return false end
+    
+    BanPlayer(playerId, reason or "No reason specified")
+    return true
+end)
+
+exports('CreatePlayerReport', function(playerId, reason, source, reporterId)
+    -- Implementation of player reporting system
+    print("^3[NexusGuard]^7 Player report created for " .. playerId .. ": " .. reason)
+    return true
+end)
+
+-- Make required globals available
+_G.ProcessDetection = ProcessDetection
+_G.PlayerMetrics = PlayerMetrics
+_G.DetectionHistory = DetectionHistory
