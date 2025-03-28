@@ -12,9 +12,10 @@ dependency {
 
 shared_scripts {
     'config.lua',
+    'globals.lua',  -- Added this line - load globals before other scripts
     'shared/utils.lua',
     'shared/constants.lua',
-    'shared/discord_config.lua'  -- Discord configuration settings
+    'shared/discord_config.lua'
 }
 
 client_scripts {
@@ -23,7 +24,7 @@ client_scripts {
     'client/networks/*.lua',
     'client/ml/*.lua',
     'client/hooks/*.lua',
-    'client/discord/*.lua'  -- Discord rich-presence files
+    'client/discord/*.lua'
 }
 
 server_scripts {
@@ -33,9 +34,9 @@ server_scripts {
     'server/detectors/*.lua',
     'server/ml/*.lua',
     'server/webhooks/*.lua',
-    'server/discord/*.lua',  -- Discord bot integration
-    'server/discord/commands/*.lua',  -- Discord bot commands
-    'server/discord/events/*.lua',  -- Discord event handlers
+    'server/discord/*.lua',
+    'server/discord/commands/*.lua',
+    'server/discord/events/*.lua',
     'server/db/*.lua',
     'server/handlers/*.lua'
 }
@@ -47,9 +48,9 @@ files {
     'ui/css/*.css',
     'ui/js/*.js',
     'ui/img/*.png',
-    'ui/img/discord/*.png',  -- Discord-related images
+    'ui/img/discord/*.png',
     'ml_models/*.json',
-    'discord_bot/config.json'  -- Discord bot configuration
+    'discord_bot/config.json'
 }
 
 lua54 'yes'
