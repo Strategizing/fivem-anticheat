@@ -1,3 +1,6 @@
+-- Import Citizen from FiveM runtime
+RegisterNetEvent('onClientResourceStart')
+
 -- Define vector3 function if it doesn't exist
 if not vector3 then
     vector3 = function(x, y, z)
