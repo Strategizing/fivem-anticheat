@@ -101,47 +101,78 @@ Config.ScreenCapture = {
 -- Discord Integration
 Config.Discord = {
     enabled = true,
-    botToken = "", -- Your Discord bot token (if using the bot feature)
+    botToken = "", -- Your Discord bot token
     guildId = "", -- Your Discord server ID
     botCommandPrefix = "!ac", -- Command prefix for Discord bot
+    inviteLink = "discord.gg/yourserver", -- Discord invite link for players
+    
     richPresence = {
         enabled = true,
         appId = "1234567890", -- Discord Application ID
         largeImageKey = "logo", -- Large image key
-        smallImageKey = "shield" -- Small image key
+        smallImageKey = "shield", -- Small image key
+        updateInterval = 60, -- How often to update presence (seconds)
+        showPlayerCount = true, -- Show current player count in status
+        showServerName = true, -- Show server name in status
+        showPlayTime = true, -- Show player's time spent on server
+        customMessages = { -- Random messages to display in rich presence
+            "Secured by NexusGuard",
+            "Protected Server",
+            "Anti-Cheat Active"
+        },
+        buttons = { -- Up to 2 buttons that appear on rich presence
+            {
+                label = "Join Discord",
+                url = "discord.gg/yourserver"
+            },
+            {
+                label = "Server Website",
+                url = "https://yourserver.com"
+            }
+        }
     },
-    moderationChannel = "", -- Channel ID for moderation alerts
-    logsChannel = "", -- Channel ID for general logs
-    publicReportsChannel = "", -- Channel ID for public player reports
-    staffRoles = {"123456789", "987654321"}, -- Role IDs that can use admin commands
-    alertPriority = {
-        high = "1122334455", -- Role ID to ping for high priority alerts
-        medium = "5566778899", -- Role ID to ping for medium priority alerts
-        low = "" -- Role ID to ping for low priority alerts
-    }
-}
-
--- Whitelist & Exemptions
-Config.Whitelist = {
-    enabled = false, -- Enable whitelist feature
-    adminsBypass = true, -- Admins bypass certain detections
-    whitelistedSteamIds = {}, -- Steam IDs exempt from certain checks
-    whitelistedDiscordIds = {}, -- Discord IDs exempt from certain checks
-    whitelistedResources = {"es_extended", "qb-core"} -- Resources exempt from integrity checks
-}
-
--- Compatibility Settings
-Config.Compatibility = {
-    framework = "auto", -- auto, esx, qb-core, vrp, custom
-    customFrameworkExport = "", -- If using custom framework
-    essentialMods = {}, -- Mods that might conflict with anti-cheat
-    playerIdentifierType = "auto" -- auto, license, steam, discord
-}
-
--- Performance Settings
-Config.Performance = {
-    optimizeForPlayerCount = true, -- Automatically adjust scan frequency based on player count
-    lowPlayerThreshold = 10, -- Number of players considered "low"
-    highPlayerThreshold = 50, -- Number of players considered "high"
-    reducedDetectionOnHighLoad = true -- Reduce detection intensity during server stress
-}
+    
+    bot = {
+        status = "Monitoring FiveM server", -- Bot status message
+        avatarURL = "", -- URL to bot's avatar image
+        embedColor = "#FF0000", -- Default color for embeds
+        activityType = "WATCHING", -- PLAYING, WATCHING, LISTENING, STREAMING
+        commands = {
+            enabled = true,
+            restrictToChannels = true, -- Restrict bot commands to specific channels
+            commandChannels = {"123456789"}, -- Channel IDs where commands are allowed
+            available = {
+                "status", -- Get server status
+                "players", -- List online players
+                "ban", -- Ban player
+                "unban", -- Unban player
+                "kick", -- Kick player
+                "warn", -- Warn player
+                "history", -- View player history
+                "screenshot", -- Request player screenshot
+                "restart", -- Restart anti-cheat
+                "help" -- Show command help
+            }
+        },
+        playerReports = {
+            enabled = true,
+            requireProof = true, -- Require screenshot/video evidence
+            notifyAdmins = true, -- Send notification to admins
+            createThreads = true, -- Create thread for each report
+            reportCooldown = 300, -- Seconds between player reports
+            autoArchiveThreads = 24 -- Hours before auto-archiving threads (0 to disable)
+        },
+        notifications = {
+            playerJoin = true, -- Notify when player joins
+            playerLeave = true, -- Notify when player leaves
+            suspiciousActivity = true, -- Notify on suspicious activity
+            serverStatus = true, -- Server status updates
+            anticheatUpdates = true -- Anti-cheat update notifications
+        }
+    },
+    
+    webhooks = {
+        general = "", -- General anti-cheat logs
+        bans = "", -- Ban notifications
+        kicks = "", -- Kick notifications
+        warnings = "", -- Warning notifications
