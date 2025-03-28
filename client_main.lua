@@ -168,7 +168,7 @@ function DetectWeaponModification()
         local clipSize = GetWeaponClipSize(weaponHash)
         
         -- Initialize weapon stats if not yet recorded
-        if not NexusGuard.playerState.weaponStats[weaponHash] then
+        if weaponHash and not NexusGuard.playerState.weaponStats[weaponHash] then
             NexusGuard.playerState.weaponStats[weaponHash] = {
                 damage = damage,
                 clipSize = clipSize
@@ -226,7 +226,7 @@ function DetectTeleport()
     local currentTime = GetGameTimer()
     
     -- Only check if we have a valid previous position
-    if lastPos.x ~= 0 or lastPos.y ~= 0 or lastPos.z ~= 0 then
+    if lastPos and (lastPos.x ~= 0 or lastPos.y ~= 0 or lastPos.z ~= 0) then
         local distance = #(currentPos - lastPos)
         local timeDiff = currentTime - NexusGuard.playerState.lastTeleport
         
@@ -252,7 +252,13 @@ function DetectNoClip()
     -- Only check if player is not in a vehicle and not dead
     if GetVehiclePedIsIn(ped, false) == 0 and not IsEntityDead(ped) then
         local pos = GetEntityCoords(ped)
-        local ground, groundZ = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z, false)
+        local ground, groundZ = false, 0
+        
+        if pos and pos.x and pos.y and pos.z then
+            local success, gZ = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z, false)
+            ground = success == true
+            groundZ = gZ or 0
+        end
         
         -- Check if player is floating and not in a legitimate falling state
         if not ground and not IsPedInParachuteFreeFall(ped) and 

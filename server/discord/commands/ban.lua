@@ -45,11 +45,11 @@ command.execute = function(user, args)
     -- Get player name from ID
     local playerName = "Unknown"
     -- GetPlayers is a FiveM native function
-    local players = GetPlayers()
+    local players = GetPlayers() or {}
     for _, playerId in ipairs(players) do
         if tonumber(playerId) == targetId then
             -- GetPlayerName is a FiveM native function
-            playerName = GetPlayerName(playerId)
+            playerName = GetPlayerName(playerId) or playerName
             break
         end
     end
