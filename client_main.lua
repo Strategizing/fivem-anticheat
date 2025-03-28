@@ -1,3 +1,24 @@
+-- Define vector3 function if it doesn't exist
+if not vector3 then
+    vector3 = function(x, y, z)
+        return {x = x or 0, y = y or 0, z = z or 0}
+    end
+end
+
+-- Define GetGameTimer if it doesn't exist
+if not GetGameTimer then
+    GetGameTimer = function()
+        -- Try different ways to get tick count
+        if type(GetTickCount64) == "function" then
+            return GetTickCount64()
+        elseif type(GetTickCount) == "function" then
+            return GetTickCount()
+        else
+            return os.clock() * 1000 -- Fallback to Lua's os.clock (in seconds) converted to ms
+        end
+    end
+end
+
 local NexusGuard = {
     securityToken = nil,
     moduleStatus = {},
@@ -11,7 +32,7 @@ local NexusGuard = {
         resourceMonitor = 15000
     },
     playerState = {
-        position = vec3(0, 0, 0),
+        position = vector3(0, 0, 0),
         health = 100,
         armor = 0,
         lastTeleport = GetGameTimer(),

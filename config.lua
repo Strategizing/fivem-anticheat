@@ -169,10 +169,12 @@ Config.Discord = {
             serverStatus = true, -- Server status updates
             anticheatUpdates = true -- Anti-cheat update notifications
         }
-    },
-    
-    webhooks = {
-        general = "", -- General anti-cheat logs
-        bans = "", -- Ban notifications
-        kicks = "", -- Kick notifications
-        warnings = "", -- Warning notifications
+        },
+        
+        webhooks = {
+            general = "", -- General anti-cheat logs
+            bans = "", -- Ban notifications
+            kicks = "", -- Kick notifications
+            warnings = "" -- Warning notifications
+        } -- Closing brace for Config.Discord.webhooks
+    } -- Closing brace for Config.Discord
