@@ -1,28 +1,36 @@
-local command = {
+local AC = AC
+
+-- Add proper declarations for FiveM natives
+local GetPlayers = GetPlayers or function() return {} end  -- Fallback if GetPlayers is nil
+local GetPlayerName = GetPlayerName or function() return "Unknown" end  -- Fallback
+local exports = exports
+
+AC.Commands.RegisterCommand('ban', {
     name = 'ban',
     description = 'Ban a player from the server',
     usage = '!ban [playerID] [duration] [reason]',
     permission = 'moderator'
-}
+}, function(interaction)
+    if not interaction or type(interaction) ~= "table" or not interaction.data then
+        return "Invalid interaction data."
+    end
 
--- Adding FiveM native function declarations for static analysis tools
----@diagnostic disable: undefined-global
--- These functions are provided by the FiveM runtime environment
-
-command.execute = function(user, args)
-    if #args < 3 then
-        return "Usage: " .. command.usage
+    local args = interaction.data.options or {}
+    local playerID = tonumber(args[1] and args[1].value)
+    
+    if not playerID then
+        return "Invalid player ID."
     end
     
-    local targetId = tonumber(args[1])
-    local duration = args[2]
-    
+    local duration = args[2] and args[2].value or "permanent"
+
     -- Combine remaining arguments for reason
     local reason = ""
     for i = 3, #args do
-        reason = reason .. args[i] .. " "
+        reason = reason .. (args[i] and args[i].value or "") .. " "
     end
-    
+    reason = reason:len() > 0 and reason or "No reason specified"
+
     -- Convert duration string to hours
     local durationHours = 0
     if duration:lower() == "permanent" or duration:lower() == "perm" then
@@ -30,7 +38,7 @@ command.execute = function(user, args)
     else
         local timeValue = tonumber(string.match(duration, "%d+"))
         local timeUnit = string.match(duration, "%a+")
-        
+
         if timeValue and timeUnit then
             if timeUnit:lower() == "h" or timeUnit:lower() == "hour" or timeUnit:lower() == "hours" then
                 durationHours = timeValue
@@ -41,32 +49,45 @@ command.execute = function(user, args)
             end
         end
     end
-    
-    -- Get player name from ID
-    local playerName = "Unknown"
-    -- GetPlayers is a FiveM native function
-    local players = GetPlayers() or {}
-    for _, playerId in ipairs(players) do
-        if tonumber(playerId) == targetId then
-            -- GetPlayerName is a FiveM native function
-            playerName = GetPlayerName(playerId) or playerName
-            break
-        end
+
+    -- Check if player is online
+local players = GetPlayers() or {}  -- Ensure we have a table, not nil
+local playerName = "Unknown"
+local found = false
+for _, playerId in ipairs(players) do
+    if tonumber(playerId) == playerID then
+        playerName = GetPlayerName(playerId) or playerName
+        found = true
+        break
     end
-    
-    -- Ban the player
-    -- exports is a FiveM global to access exports from other resources
-    local success = exports.nexusguard:BanPlayer(targetId, reason, durationHours, user.id)
-    
+end
+
+    if not found then
+        return "Player not found."
+    end
+
+    -- Ban the player - ensure we're using valid function call
+    local success = false
+    local banExport = exports["fivem-anticheat"]
+    if banExport and type(banExport.BanPlayer) == "function" then
+        success = banExport:BanPlayer(playerID, {
+            reason = reason,
+            duration = durationHours,
+            bannedBy = interaction.user and interaction.user.id or "Console"
+        })
+    else
+        print("^1[NexusGuard] Error: BanPlayer export not found^7")
+    end
+
     if success then
         -- Create Discord embed for ban notification
         local embed = {
             title = "Player Banned",
             color = 16711680, -- Red
             fields = {
-                {name = "Player", value = playerName .. " (ID: " .. targetId .. ")", inline = true},
-                {name = "Banned by", value = user.username, inline = true},
-                {name = "Duration", value = duration == "0" and "Permanent" or duration, inline = true},
+                {name = "Player", value = playerName .. " (ID: " .. playerID .. ")", inline = true},
+                {name = "Banned by", value = (interaction.user and interaction.user.username) or "Console", inline = true},
+                {name = "Duration", value = (durationHours == 0) and "Permanent" or duration, inline = true},
                 {name = "Reason", value = reason, inline = false}
             },
             footer = {
@@ -74,15 +95,19 @@ command.execute = function(user, args)
             },
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }
-        
-        -- Log to Discord channel
-        exports['discord_bot']:SendEmbed(Config.Discord.Channels.BanLogs, embed)
-        
-        return "Player " .. playerName .. " (ID: " .. targetId .. ") has been banned."
+
+        -- Log to Discord channel safely
+        local channelId = Config and Config.Discord and Config.Discord.Channels and Config.Discord.Channels.BanLogs or nil
+        local logExport = exports["fivem-anticheat"]
+        if logExport and type(logExport.AddSystemLog) == "function" then
+            logExport:AddSystemLog({
+                embed = embed,
+                channel = channelId
+            })
+        end
+
+        return "Player " .. playerName .. " (ID: " .. playerID .. ") has been banned."
     else
         return "Failed to ban player. Check if the player ID is valid."
     end
-end
----@diagnostic enable: undefined-global
-
-return command
+end)
