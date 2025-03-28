@@ -364,13 +364,16 @@ function NotifyAdmins(playerId, detectionType, detectionData)
     -- Send to all admins
     for _, adminId in ipairs(GetPlayers()) do
         if IsPlayerAdmin(adminId) then
-            TriggerClientEvent('nexusguard:adminNotification', adminId, {
-                player = playerName,
-                id = playerId,
-                type = detectionType,
-                data = detectionData,
-                timestamp = os.time()
-            })
+            local adminIdNum = tonumber(adminId)
+            if adminIdNum then -- Make sure we have a valid number
+                TriggerClientEvent('nexusguard:adminNotification', adminIdNum, {
+                    player = playerName,
+                    id = playerId,
+                    type = detectionType,
+                    data = detectionData,
+                    timestamp = os.time()
+                })
+            end
         end
     end
 end

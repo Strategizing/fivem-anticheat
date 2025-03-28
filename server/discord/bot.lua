@@ -35,12 +35,29 @@ end
 -- Register Discord bot commands
 function DiscordBot.RegisterCommands()
     -- Load all command modules from the commands directory
-    local commandFiles = LoadResourceFile(GetCurrentResourceName(), 'server/discord/commands')
+    local commandFiles = {}
+    
+    -- Use FiveM's metadata system to get command files
+    local numFiles = GetNumResourceMetadata(GetCurrentResourceName(), 'discord_command')
+    for i = 0, numFiles-1 do
+        table.insert(commandFiles, GetResourceMetadata(GetCurrentResourceName(), 'discord_command', i))
+    end
+    
     for _, file in ipairs(commandFiles) do
-        local commandModule = LoadResourceFile(GetCurrentResourceName(), 'server/discord/commands/' .. file)
-        if commandModule and commandModule.name then
-            DiscordBot.commands[commandModule.name] = commandModule
-            print('^3[NexusGuard] Registered Discord command: ' .. commandModule.name .. '^7')
+        local commandContent = LoadResourceFile(GetCurrentResourceName(), 'server/discord/commands/' .. file)
+        if commandContent then
+            local commandFunc, err = load(commandContent, 'command_' .. file)
+            if commandFunc then
+                local success, commandModule = pcall(commandFunc)
+                if success and commandModule and type(commandModule) == 'table' and commandModule.name then
+                    DiscordBot.commands[commandModule.name] = commandModule
+                    print('^3[NexusGuard] Registered Discord command: ' .. commandModule.name .. '^7')
+                else
+                    print('^1[NexusGuard] Failed to register command from file: ' .. file .. '^7')
+                end
+            else
+                print('^1[NexusGuard] Error loading command file: ' .. file .. ' - ' .. tostring(err) .. '^7')
+            end
         end
     end
     
