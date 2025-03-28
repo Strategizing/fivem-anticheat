@@ -84,85 +84,27 @@ end)
 
 -- Start all protection modules based on scan intervals
 function StartProtectionModules()
-    -- Load configuration
-    if Config and Config.Detectors then
-        -- God Mode Detection
-        if Config.Detectors.godMode then
-            Citizen.CreateThread(function()
-                while true do
-                    DetectGodMode()
-                    Citizen.Wait(NexusGuard.scanIntervals.godMode)
+    Citizen.CreateThread(function()
+        while true do
+            Citizen.Wait(1000) -- Check each second, adjust as needed
+            if Config and Config.Detectors then
+                if Config.Detectors.godMode then DetectGodMode() end
+                if Config.Detectors.weaponModification then DetectWeaponModification() end
+                if Config.Detectors.speedHack then DetectSpeedHack() end
+                if Config.Detectors.teleporting then DetectTeleport() end
+                if Config.Detectors.noclip then DetectNoClip() end
+                if Config.Detectors.menuDetection then DetectModMenus() end
+                if Config.Detectors.resourceInjection then
+                    local currentTime = GetGameTimer()
+                    if currentTime - (NexusGuard.lastResourceCheck or 0) > 15000 then
+                        MonitorResources()
+                        NexusGuard.lastResourceCheck = currentTime
+                    end
                 end
-            end)
+            end
         end
-        
-        -- Weapon Modification Detection
-        if Config.Detectors.weaponModification then
-            Citizen.CreateThread(function()
-                while true do
-                    DetectWeaponModification()
-                    Citizen.Wait(NexusGuard.scanIntervals.weaponModification)
-                end
-            end)
-        end
-        
-        -- Speed Hack Detection
-        if Config.Detectors.speedHack then
-            Citizen.CreateThread(function()
-                while true do
-                    DetectSpeedHack()
-                    Citizen.Wait(NexusGuard.scanIntervals.speedHack)
-                end
-            end)
-        end
-        
-        -- Teleport Detection
-        if Config.Detectors.teleporting then
-            Citizen.CreateThread(function()
-                while true do
-                    DetectTeleport()
-                    Citizen.Wait(NexusGuard.scanIntervals.teleport)
-                end
-            end)
-        end
-        
-        -- NoClip Detection
-        if Config.Detectors.noclip then
-            Citizen.CreateThread(function()
-                while true do
-                    DetectNoClip()
-                    Citizen.Wait(NexusGuard.scanIntervals.noclip)
-                end
-            end)
-        end
-        
-        -- Menu Detection
-        if Config.Detectors.menuDetection then
-            Citizen.CreateThread(function()
-                while true do
-                    DetectModMenus()
-                    Citizen.Wait(NexusGuard.scanIntervals.menuDetection)
-                end
-            end)
-        end
-        
-        -- Resource Monitor
-        if Config.Detectors.resourceInjection then
-            Citizen.CreateThread(function()
-                while true do
-                    MonitorResources()
-                    Citizen.Wait(NexusGuard.scanIntervals.resourceMonitor)
-                end
-            end)
-        end
-    else
-        -- If Config isn't loaded yet, try again shortly
-        Citizen.SetTimeout(1000, StartProtectionModules)
-    end
-    
-    InitializeRichPresence() -- Replaces the old InitializeDiscordRichPresence call
-    
-    print('[NexusGuard] Protection modules initialized')
+    end)
+    InitializeRichPresence()
 end
 
 -- Detection functions

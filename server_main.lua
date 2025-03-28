@@ -1,3 +1,5 @@
+RegisterNetEvent('onResourceStart')
+
 local NexusGuard = {}
 local BanList = {}
 local DetectionHistory = {}
@@ -314,31 +316,21 @@ end
 
 -- Scheduled task to monitor players
 function SetupScheduledTasks()
-    -- Collect player metrics every minute
     Citizen.CreateThread(function()
         while true do
             Citizen.Wait(60000)
             CollectPlayerMetrics()
+            CleanupDetectionHistory()
         end
     end)
-    
-    -- Update AI models periodically if enabled
     if Config.AI and Config.AI.enabled then
         Citizen.CreateThread(function()
             while true do
-                Citizen.Wait(86400000) -- Daily check
+                Citizen.Wait(86400000) -- Keep daily AI model updates separate
                 UpdateAIModels()
             end
         end)
     end
-    
-    -- Clean up old detection history
-    Citizen.CreateThread(function()
-        while true do
-            Citizen.Wait(3600000) -- Hourly cleanup
-            CleanupDetectionHistory()
-        end
-    end)
 end
 
 function RegisterServerEvents()
