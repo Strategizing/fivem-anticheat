@@ -1,4 +1,10 @@
 -- Import Citizen from FiveM runtime
+if not RegisterNetEvent then
+    function RegisterNetEvent(eventName)
+        -- Stub for environments without this API
+    end
+end
+
 RegisterNetEvent('onClientResourceStart')
 
 -- Define vector3 function if it doesn't exist
