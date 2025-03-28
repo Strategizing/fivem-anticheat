@@ -33,6 +33,12 @@ if not GetGameTimer then
     end
 end
 
+if not GetEntityHealth then
+    GetEntityHealth = function(entity)
+        return 100 -- Default health value for testing environment
+    end
+end
+
 RegisterNetEvent('onClientResourceStart')
 
 -- Main NexusGuard object with all configuration and state

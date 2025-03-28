@@ -5,6 +5,10 @@ local command = {
     permission = 'moderator'
 }
 
+-- Adding FiveM native function declarations for static analysis tools
+---@diagnostic disable: undefined-global
+-- These functions are provided by the FiveM runtime environment
+
 command.execute = function(user, args)
     if #args < 3 then
         return "Usage: " .. command.usage
@@ -40,15 +44,18 @@ command.execute = function(user, args)
     
     -- Get player name from ID
     local playerName = "Unknown"
+    -- GetPlayers is a FiveM native function
     local players = GetPlayers()
     for _, playerId in ipairs(players) do
         if tonumber(playerId) == targetId then
+            -- GetPlayerName is a FiveM native function
             playerName = GetPlayerName(playerId)
             break
         end
     end
     
     -- Ban the player
+    -- exports is a FiveM global to access exports from other resources
     local success = exports.nexusguard:BanPlayer(targetId, reason, durationHours, user.id)
     
     if success then
@@ -76,5 +83,6 @@ command.execute = function(user, args)
         return "Failed to ban player. Check if the player ID is valid."
     end
 end
+---@diagnostic enable: undefined-global
 
 return command
