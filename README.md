@@ -21,11 +21,12 @@ NexusGuard is a modular, event-driven anti-cheat framework designed for FiveM se
 
 *   **[oxmysql](https://github.com/overextended/oxmysql)**: Required for database features (bans, detections, sessions) if `Config.Database.enabled = true`. Also provides the necessary JSON library. **Must be started before NexusGuard.**
 *   **[screenshot-basic](https://github.com/citizenfx/screenshot-basic)**: Required for the screenshot functionality if `Config.ScreenCapture.enabled = true`. **Must be started before NexusGuard.**
+*   **[ox_lib](https://github.com/overextended/ox_lib)**: Required for the default secure token implementation (HMAC-SHA256). Provides `lib.crypto`. **Must be started before NexusGuard.**
 
 **Optional:**
 
 *   **`chat` resource**: Recommended for displaying client-side warnings via the `NexusGuard:CheatWarning` event. If not used, warnings will only appear in the F8 console.
-*   **Permissions System Integration**: You **must** implement the logic within the `IsPlayerAdmin` function in `globals.lua` to correctly check permissions based on your server's admin system (e.g., FiveM ACE perms, ESX/QBCore framework groups/permissions). The default implementation only checks ACE perms listed in `Config.AdminGroups`.
+*   **Framework for Permissions (ESX/QBCore)**: If you set `Config.PermissionsFramework` to `"esx"` or `"qbcore"`, the corresponding framework (`es_extended` or `qb-core`) must be running and started *before* NexusGuard for admin checks to function correctly.
 *   **External Discord Bot**: If using advanced Discord bot features (commands, player reports beyond webhooks) defined in `config.lua`, a separate bot implementation (e.g., using discord.js, discord.py, etc.) interacting with NexusGuard (potentially via custom events or API calls) is required. This framework only provides basic webhook logging and Rich Presence.
 
 ## Installation
@@ -40,35 +41,28 @@ NexusGuard is a modular, event-driven anti-cheat framework designed for FiveM se
 5.  **Configure `config.lua`:**
     *   Carefully review **all** options in `config.lua`.
     *   Carefully review **all** options in `config.lua`. Pay close attention to comments indicating required fields or critical settings.
-    *   **CRITICAL:** Set `Config.SecuritySecret` to a **long, unique, and random string**. This secret is intended for use with a **secure token implementation** (see Step 6). **Do not leave the default value.**
+    *   **CRITICAL:** Set `Config.SecuritySecret` to a **long, unique, and random string**. This secret is used by the default secure token implementation (HMAC-SHA256). **Do not leave the default value or share it.**
+    *   **Set `Config.PermissionsFramework`:** Choose `"ace"`, `"esx"`, `"qbcore"`, or `"custom"` based on your server's permission system. See comments in `config.lua`.
+    *   **Configure `Config.AdminGroups`:** List the group/permission names that should be considered admin *according to the framework selected above*. (e.g., for ACE: `"admin"`, `"superadmin"`; for ESX: `"admin"`, `"superadmin"`; for QBCore: `"admin"`, `"god"`, etc.).
     *   Fill in required URLs/IDs if features are enabled: `Config.DiscordWebhook` (for general logs), specific webhook URLs in `Config.Discord.webhooks` (optional), `Config.ScreenCapture.webhookURL`, `Config.Discord.RichPresence.AppId`.
-    *   Configure `Config.AdminGroups` to match your server's ACE permission groups for admins if you rely on the default `IsPlayerAdmin` logic.
     *   If enabling `Config.Features.resourceVerification`, carefully configure the `whitelist` or `blacklist`. **Whitelist mode requires adding ALL essential server resources (framework, maps, scripts) to prevent false kicks/bans.** See comments in `config.lua`.
     *   Adjust detection thresholds (`Config.Thresholds`) and enable/disable detectors (`Config.Detectors`) based on testing and server needs.
-6.  **Implement Critical Placeholders:**
-    *   **(MANDATORY) Security Implementation (`globals.lua`):**
-        *   The default security functions (`ValidateClientHash`, `GenerateSecurityToken`, `ValidateSecurityToken`, `PseudoHmac`) are **HIGHLY INSECURE PLACEHOLDERS**. They offer **NO REAL PROTECTION** against event spoofing.
-        *   You **MUST** replace the logic within `GenerateSecurityToken` and `ValidateSecurityToken` with a robust, server-authoritative implementation.
-        *   **Recommended Approaches:**
-            *   **HMAC-SHA256 Signing:** Use `Config.SecuritySecret` with a proper Lua crypto library (e.g., `lua-lockbox`, potentially `ox_lib` functions if available) to sign/verify data in events.
-            *   **Secure Session Tokens:** Generate secure random tokens server-side, associate them with player sessions, and validate them.
-            *   **Framework Secure Events:** Leverage built-in secure event systems if your framework provides them.
-        *   **Failure to replace these placeholders WILL leave your server extremely vulnerable.** See the large warning block in `globals.lua`.
-    *   **(MANDATORY) Admin Permission Check (`globals.lua`):**
-        *   Implement the `IsPlayerAdmin(playerId)` function to accurately check permissions based on **your specific server's setup** (ACE perms, ESX groups, QBCore permissions/jobs, etc.). The provided examples need uncommenting and adaptation.
-    *   **(Optional) Resource Verification Logic (`server_main.lua`):**
-        *   If you enable `Config.Features.resourceVerification.enabled = true`, you **MUST** implement the actual resource list comparison logic within the `SYSTEM_RESOURCE_CHECK` event handler in `server_main.lua`. The current code only contains comments and a warning log.
+6.  **Implement Custom Logic (If Needed):**
+    *   **Custom Permissions:** If you set `Config.PermissionsFramework = "custom"`, you **MUST** edit the `IsPlayerAdmin` function in `globals.lua` to add your specific permission checking logic.
     *   **(Optional) AI & Other Placeholders:** Review other functions marked as placeholders (AI functions, `HandleEntityCreation`) and implement them if you intend to use those features.
-7.  **Server Config:** Add `ensure NexusGuard` to your `server.cfg`, ensuring it starts *after* its dependencies (`oxmysql`, `screenshot-basic`).
+7.  **Server Config:** Add `ensure NexusGuard` to your `server.cfg`, ensuring it starts *after* its dependencies (`oxmysql`, `screenshot-basic`, `ox_lib`, and potentially `es_extended` or `qb-core` if selected).
+8.  **Restart Server & Test:** Restart your FiveM server. Check the console thoroughly for any NexusGuard errors or warnings (especially critical ones about missing dependencies or security). Test detections and actions rigorously, paying close attention to admin checks.
+    *   **(Optional) AI & Other Placeholders:** Review other functions marked as placeholders (AI functions, `HandleEntityCreation`) and implement them if you intend to use those features.
+7.  **Server Config:** Add `ensure NexusGuard` to your `server.cfg`, ensuring it starts *after* its dependencies (`oxmysql`, `screenshot-basic`, `ox_lib`).
 8.  **Restart Server & Test:** Restart your FiveM server. Check the console thoroughly for any NexusGuard errors or warnings (especially critical ones about missing functions or security). Test detections and actions rigorously.
 
 ## Configuration Deep Dive
 
 *   **`config.lua`**: Contains all user-configurable settings. Read the comments carefully.
-*   **`Config.SecuritySecret`**: **MUST BE CHANGED** to a strong, unique secret **AND USED IN A SECURE TOKEN IMPLEMENTATION**.
-*   **Security Placeholders**: The functions `GenerateSecurityToken` and `ValidateSecurityToken` in `globals.lua` **MUST BE REPLACED** with a secure implementation. The default is **NOT SECURE**.
-*   **`IsPlayerAdmin`**: This function in `globals.lua` **MUST BE IMPLEMENTED** correctly for your server's permission system.
-*   **Resource Verification**: If enabled, the logic in `server_main.lua` **MUST BE IMPLEMENTED**. Use with caution, especially whitelist mode.
+*   **`Config.SecuritySecret`**: **MUST BE CHANGED** to a strong, unique secret. This is used by the default secure token system.
+*   **Security Implementation**: A default secure token system using HMAC-SHA256 (via `ox_lib`) is now included. Ensure `ox_lib` is installed and `Config.SecuritySecret` is set correctly.
+*   **Permissions**: Configure `Config.PermissionsFramework` and `Config.AdminGroups` in `config.lua`. You only need to edit `globals.lua` if using the `"custom"` framework setting.
+*   **Resource Verification**: The logic is implemented, but if enabled, the `whitelist` or `blacklist` in `config.lua` **MUST BE CONFIGURED ACCURATELY**. Whitelist mode is dangerous if not all required resources are listed.
 *   **Thresholds**: Tune detection thresholds (`Config.Thresholds`) carefully through testing.
 *   **Detectors**: Enable/disable specific detectors (`Config.Detectors`).
 *   **Actions**: Configure reactions (`Config.Actions`).
@@ -81,6 +75,57 @@ NexusGuard is a modular, event-driven anti-cheat framework designed for FiveM se
 4.  Implement the `Detector.Check()` function with your detection logic. Use `_G.NexusGuard:ReportCheat(DetectorName, details)` to report violations (this handles the warning system and triggers the server event).
 5.  Implement `Detector.Initialize()` if needed (e.g., to read specific config values).
 6.  The registration block at the end will automatically register and start your detector if `Config.Detectors[DetectorName]` is set to `true`.
+
+## Common Issues & Troubleshooting
+
+*   **CRITICAL: `Config.SecuritySecret` Error / Invalid Token Errors:**
+    *   **Cause:** You haven't changed `Config.SecuritySecret` in `config.lua` from the default value, or `ox_lib` is not started *before* NexusGuard.
+    *   **Solution:**
+        1.  **STOP YOUR SERVER.**
+        2.  Open `config.lua` and set `Config.SecuritySecret` to a **long, unique, random string** (e.g., use a password generator). **DO NOT SHARE THIS SECRET.**
+        3.  Ensure `ensure ox_lib` is listed **before** `ensure NexusGuard` in your `server.cfg`.
+        4.  Restart your server.
+
+*   **Players Kicked/Banned Incorrectly by Resource Verification:**
+    *   **Cause:** If using `Config.Features.resourceVerification.mode = "whitelist"`, you haven't added all essential server resources to the `whitelist` table in `config.lua`.
+    *   **Solution:**
+        1.  Temporarily set `Config.Features.resourceVerification.enabled = false` in `config.lua` to stop the kicks/bans.
+        2.  Restart NexusGuard (`restart NexusGuard`).
+        3.  As an admin in-game, run the command `/nexusguard_getresources`.
+        4.  Copy the entire list printed in your chat (including the `{` and `}` braces).
+        5.  Paste this list into the `Config.Features.resourceVerification.whitelist` table in `config.lua`, replacing the default example list.
+        6.  Review the pasted list and remove any non-essential or temporary resources if desired.
+        7.  Set `Config.Features.resourceVerification.enabled = true` again.
+        8.  Restart NexusGuard (`restart NexusGuard`).
+
+*   **Admin Commands Don't Work / Not Detected as Admin:**
+    *   **Cause:** `Config.PermissionsFramework` is not set correctly, `Config.AdminGroups` doesn't match your framework's groups, or the required framework (ESX/QBCore) isn't started before NexusGuard.
+    *   **Solution:**
+        1.  Verify `Config.PermissionsFramework` in `config.lua` matches your server ("ace", "esx", "qbcore").
+        2.  Verify `Config.AdminGroups` contains the exact group names used by your framework for admins (case-sensitive). Check your framework's documentation or database if unsure.
+        3.  If using "esx" or "qbcore", ensure `ensure es_extended` or `ensure qb-core` is listed **before** `ensure NexusGuard` in your `server.cfg`.
+
+*   **Database Errors (Connection, Schema):**
+    *   **Cause:** `oxmysql` is not configured correctly, not started before NexusGuard, or the database schema wasn't imported.
+    *   **Solution:**
+        1.  Ensure `oxmysql` is installed and configured with your correct database credentials.
+        2.  Ensure `ensure oxmysql` is listed **before** `ensure NexusGuard` in your `server.cfg`.
+        3.  Verify you imported `NexusGuard/sql/schema.sql` into your database. Check the server console for specific MySQL errors during startup.
+
+*   **Screenshot Errors:**
+    *   **Cause:** `screenshot-basic` resource is missing or not started before NexusGuard, or `Config.ScreenCapture.webhookURL` is incorrect or missing.
+    *   **Solution:**
+        1.  Ensure `screenshot-basic` is installed.
+        2.  Ensure `ensure screenshot-basic` is listed **before** `ensure NexusGuard` in your `server.cfg`.
+        3.  Verify `Config.ScreenCapture.webhookURL` in `config.lua` is a valid Discord webhook URL.
+
+*   **False Positives (Speed, Teleport, etc.):**
+    *   **Cause:** Default thresholds in `Config.Thresholds` might be too strict for your server or specific situations (e.g., custom vehicles, specific framework teleports).
+    *   **Solution:** Gradually increase the relevant threshold values in `Config.Thresholds` (e.g., `speedHackMultiplier`, `teleportDistance`) and test thoroughly. Monitor server console logs for detection messages to identify patterns.
+
+*   **"[NexusGuard] CRITICAL: _G.EventRegistry not found..." Error:**
+    *   **Cause:** The essential `shared/event_registry.lua` script is not being loaded correctly.
+    *   **Solution:** Ensure `shared/event_registry.lua` exists and is correctly listed under `shared_scripts` in your `fxmanifest.lua`.
 
 ## API / Exports
 

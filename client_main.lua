@@ -52,6 +52,8 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         _G.EventRegistry.RegisterEvent('SECURITY_RECEIVE_TOKEN')
         _G.EventRegistry.RegisterEvent('ADMIN_NOTIFICATION') -- Used for admin alerts from server
         _G.EventRegistry.RegisterEvent('ADMIN_REQUEST_SCREENSHOT')
+        _G.EventRegistry.RegisterEvent('NEXUSGUARD_POSITION_UPDATE') -- Register server event for position updates
+        _G.EventRegistry.RegisterEvent('NEXUSGUARD_HEALTH_UPDATE') -- Register server event for health updates
         -- Register the local warning event name for consistency, though handled locally
         RegisterNetEvent("NexusGuard:CheatWarning")
     else
@@ -144,12 +146,14 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
             -- If errors persist, notify server
             if self.errors[detectionName].count > 5 and
                GetGameTimer() - self.errors[detectionName].firstSeen < 60000 then
-                if self.securityToken then
+                if self.securityToken then -- Check if token exists (should be a table now)
                     -- Use EventRegistry if available
                     if _G.EventRegistry then
+                        -- Send the error details and the security token table
                         _G.EventRegistry.TriggerServerEvent('SYSTEM_ERROR', detectionName, tostring(err), self.securityToken)
                     else
-                        TriggerServerEvent("NexusGuard:ClientError", detectionName, tostring(err), self.securityToken) -- Fallback
+                        -- TriggerServerEvent("NexusGuard:ClientError", detectionName, tostring(err), self.securityToken) -- Fallback removed
+                        print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot report client error to server.^7")
                     end
                 end
 
@@ -202,6 +206,20 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         -- Start auxiliary protection modules (like Rich Presence)
         -- Detectors are started automatically via their registration block in detector_registry.lua
         self:StartProtectionModules()
+
+        -- Start periodic position update thread
+        Citizen.CreateThread(function()
+            local positionUpdateInterval = 5000 -- ms (e.g., every 5 seconds)
+            while true do
+                Citizen.Wait(positionUpdateInterval)
+                -- Only send updates if initialized and token is valid
+                if self.initialized and self.securityToken and type(self.securityToken) == "table" then
+                    self:SendPositionUpdate()
+                    self:SendHealthUpdate() -- Add health update call
+                end
+            end
+        end)
+        print('^2[NexusGuard]^7 Position update thread started.')
 
         self.initialized = true
         print('^2[NexusGuard]^7 Core protection system initialized')
@@ -324,13 +342,63 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
     end
 
     --[[
+        Send Position Update
+        Sends current player position to the server for validation
+    ]]
+    function NexusGuard:SendPositionUpdate()
+        -- Skip if not initialized or no security token
+        if not self.initialized or not self.securityToken or type(self.securityToken) ~= "table" then
+            -- print("^3[NexusGuard] SendPositionUpdate skipped: Not initialized or no valid security token.^7") -- Reduce log spam
+            return
+        end
+
+        local ped = PlayerPedId()
+        if not DoesEntityExist(ped) then return end
+
+        local currentPos = GetEntityCoords(ped)
+        local currentTimestamp = GetGameTimer() -- Use game timer for consistency
+
+        -- Send position data and token table to server
+        if _G.EventRegistry then
+            _G.EventRegistry.TriggerServerEvent('NEXUSGUARD_POSITION_UPDATE', currentPos, currentTimestamp, self.securityToken)
+        else
+            print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot send position update to server.^7")
+        end
+    end
+
+    --[[
+        Send Health Update
+        Sends current player health and armor to the server for validation
+    ]]
+    function NexusGuard:SendHealthUpdate()
+        -- Skip if not initialized or no security token
+        if not self.initialized or not self.securityToken or type(self.securityToken) ~= "table" then
+            return
+        end
+
+        local ped = PlayerPedId()
+        if not DoesEntityExist(ped) then return end
+
+        local currentHealth = GetEntityHealth(ped)
+        local currentArmor = GetPedArmour(ped)
+        local currentTimestamp = GetGameTimer()
+
+        -- Send health/armor data and token table to server
+        if _G.EventRegistry then
+            _G.EventRegistry.TriggerServerEvent('NEXUSGUARD_HEALTH_UPDATE', currentHealth, currentArmor, currentTimestamp, self.securityToken)
+        else
+            print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot send health update to server.^7")
+        end
+    end
+
+    --[[
         Cheat Reporting (Called by Detectors)
         Sends detection info to server
     ]]
     function NexusGuard:ReportCheat(type, details)
-        -- Skip if not initialized or no security token
-        if not self.initialized or not self.securityToken then
-            print("^3[NexusGuard] ReportCheat skipped: Not initialized or no security token.^7")
+        -- Skip if not initialized or no security token (token should be a table)
+        if not self.initialized or not self.securityToken or type(self.securityToken) ~= "table" then
+            print("^3[NexusGuard] ReportCheat skipped: Not initialized or no valid security token.^7")
             return
         end
 
@@ -341,7 +409,7 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
             -- Trigger local warning event
             TriggerEvent("NexusGuard:CheatWarning", type, details)
         else
-            -- Report subsequent detections to server
+            -- Report subsequent detections to server, sending the token table
             if _G.EventRegistry then
                 _G.EventRegistry.TriggerServerEvent('DETECTION_REPORT', type, details, self.securityToken)
             else
@@ -355,15 +423,21 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         Event Handlers
     ]]
     -- Use EventRegistry for handlers where possible
-    local receiveTokenEvent = (_G.EventRegistry and _G.EventRegistry.GetEventName('SECURITY_RECEIVE_TOKEN')) or "NexusGuard:ReceiveSecurityToken"
-    AddEventHandler(receiveTokenEvent, function(token)
-        if not token or type(token) ~= "string" then
-             print("^1[NexusGuard] Received invalid security token.^7")
-             return
-        end
-        NexusGuard.securityToken = token
-        print("^2[NexusGuard] Security handshake completed via " .. receiveTokenEvent .. "^7")
-    end)
+    local receiveTokenEvent = (_G.EventRegistry and _G.EventRegistry.GetEventName('SECURITY_RECEIVE_TOKEN')) -- No fallback needed
+    if receiveTokenEvent then
+        AddEventHandler(receiveTokenEvent, function(tokenData)
+            -- Expecting a table { timestamp = ..., signature = ... }
+            if not tokenData or type(tokenData) ~= "table" or not tokenData.timestamp or not tokenData.signature then
+                 print("^1[NexusGuard] Received invalid security token data structure from server.^7")
+                 -- Consider requesting again or handling error
+                 return
+            end
+            NexusGuard.securityToken = tokenData -- Store the entire table
+            print("^2[NexusGuard] Security handshake completed via " .. receiveTokenEvent .. "^7")
+        end)
+    else
+         print("^1[NexusGuard] CRITICAL: Could not get event name for SECURITY_RECEIVE_TOKEN from EventRegistry.^7")
+    end
 
     -- Handler for the local warning event (doesn't need registry)
     AddEventHandler("NexusGuard:CheatWarning", function(type, details)
@@ -428,7 +502,7 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
                 if success and resp and resp.attachments and resp.attachments[1] and resp.attachments[1].url then
                     local screenshotUrl = resp.attachments[1].url
                     print("^2[NexusGuard] Screenshot uploaded successfully: " .. screenshotUrl .. "^7")
-                    -- Report screenshot taken back to server
+                    -- Report screenshot taken back to server, sending the token table
                     if _G.EventRegistry then
                          _G.EventRegistry.TriggerServerEvent('ADMIN_SCREENSHOT_TAKEN', screenshotUrl, NexusGuard.securityToken)
                     else

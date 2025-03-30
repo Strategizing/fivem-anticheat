@@ -6,12 +6,23 @@ Config.EnableDiscordLogs = true -- Enable Discord webhook logs
 Config.DiscordWebhook = "" -- Your Discord webhook URL
 Config.BanMessage = "You have been banned for cheating. Appeal at: discord.gg/yourserver" -- Ban message
 Config.KickMessage = "You have been kicked for suspicious activity." -- Kick message
-Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups that can access admin commands (Used by placeholder IsPlayerAdmin function)
+
+-- Permissions Framework Configuration
+-- Set this to match your server's permission system. Affects the IsPlayerAdmin check in globals.lua.
+-- Options:
+-- "ace"    : Use built-in FiveM ACE permissions (checks group.<group_name> for groups in Config.AdminGroups).
+-- "esx"    : Use ESX framework (checks xPlayer.getGroup() against Config.AdminGroups). Requires ESX to be running.
+-- "qbcore" : Use QBCore framework (checks QBCore.Functions.HasPermission(playerId, group) for groups in Config.AdminGroups). Requires QBCore to be running.
+-- "custom" : Use this if you want to write your own logic directly into the IsPlayerAdmin function in globals.lua.
+Config.PermissionsFramework = "ace" -- Default to ACE permissions
+
+Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups considered admin by the selected framework check (case-sensitive depending on framework)
+-- Example ESX groups: {"admin", "superadmin"}
+-- Example QBCore groups: {"admin", "god"}
+
 -- !! CRITICAL !! Change this to a long, unique, random string for your server.
--- This is used by the **INSECURE PLACEHOLDER** token generation/validation in globals.lua.
--- A strong, unique secret is essential **AND YOU MUST REPLACE THE PLACEHOLDER FUNCTIONS**
--- in globals.lua (GenerateSecurityToken, ValidateSecurityToken) with a secure implementation (e.g., HMAC-SHA256).
--- **LEAVING THIS AS DEFAULT OR USING THE PLACEHOLDER FUNCTIONS WILL MAKE YOUR SERVER VULNERABLE.**
+-- This is used by the default secure token implementation (HMAC-SHA256 via ox_lib).
+-- **LEAVING THIS AS DEFAULT OR USING A WEAK SECRET WILL MAKE YOUR SERVER VULNERABLE.**
 Config.SecuritySecret = "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" -- <<< CHANGE THIS!!!
 
 -- Auto Configuration (Placeholder Features)
@@ -32,6 +43,24 @@ Config.Thresholds = {
     entitySpawnLimit = 15, -- Entities spawned per minute
     healthRegenerationRate = 2.0, -- Health regeneration rate threshold
     aiDecisionConfidenceThreshold = 0.75 -- AI confidence threshold for automated action
+}
+
+-- Server-Side Weapon Base Damage (for validation)
+-- Add known base damage values for weapons here. This helps the server validate client reports.
+-- Values can vary based on game version/mods. Use GetWeaponDamage native on a clean client/server to find defaults.
+-- Key: Weapon Hash (use GetHashKey("WEAPON_PISTOL") etc.) Value: Base Damage (float)
+Config.WeaponBaseDamage = {
+    [GetHashKey("WEAPON_PISTOL")] = 26.0,
+    [GetHashKey("WEAPON_COMBATPISTOL")] = 27.0,
+    [GetHashKey("WEAPON_APPISTOL")] = 28.0,
+    [GetHashKey("WEAPON_MICROSMG")] = 21.0,
+    [GetHashKey("WEAPON_SMG")] = 22.0,
+    [GetHashKey("WEAPON_ASSAULTRIFLE")] = 30.0,
+    [GetHashKey("WEAPON_CARBINERIFLE")] = 32.0,
+    [GetHashKey("WEAPON_SPECIALCARBINE")] = 34.0,
+    [GetHashKey("WEAPON_PUMPSHOTGUN")] = 30.0, -- Damage per pellet, often multiple pellets per shot
+    [GetHashKey("WEAPON_SNIPERRIFLE")] = 100.0,
+    -- Add more weapons as needed...
 }
 
 -- Detection Types

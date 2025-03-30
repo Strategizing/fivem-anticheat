@@ -14,6 +14,7 @@ dependencies {
 }
 
 shared_scripts {
+    '@ox_lib/init.lua', -- Required for lib.crypto used in default secure token implementation
     'config.lua',
     'globals.lua', -- Contains helpers and PLACEHOLDERS requiring user implementation
     'shared/detector_registry.lua',

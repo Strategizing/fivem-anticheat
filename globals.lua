@@ -26,6 +26,36 @@ local BanCacheDuration = 300 -- Cache duration in seconds (5 minutes)
 -- Initialize PlayerMetrics globally if it doesn't exist
 _G.PlayerMetrics = _G.PlayerMetrics or {}
 
+-- Attempt to load framework objects for permission checks
+local ESX = nil
+local QBCore = nil
+
+Citizen.CreateThread(function()
+    Citizen.Wait(1000) -- Wait a bit for other resources to potentially load
+    -- Attempt to get ESX object if resource is started
+    if GetResourceState('es_extended') == 'started' then
+        local esxExport = exports['es_extended']
+        if esxExport and esxExport.getSharedObject then
+             ESX = esxExport:getSharedObject()
+             Log("ESX object loaded for permission checks.", 3)
+        else
+             Log("es_extended resource found, but could not get SharedObject.", 2)
+        end
+    end
+
+    -- Attempt to get QBCore object if resource is started
+    if GetResourceState('qb-core') == 'started' then
+         local qbExport = exports['qb-core']
+         if qbExport and qbExport.GetCoreObject then
+             QBCore = qbExport:GetCoreObject()
+             Log("QBCore object loaded for permission checks.", 3)
+         else
+             Log("qb-core resource found, but could not get CoreObject.", 2)
+         end
+    end
+end)
+
+
 -- Database Initialization (Uses oxmysql)
 function InitializeDatabase()
     if not Config or not Config.Database or not Config.Database.enabled then
@@ -246,61 +276,89 @@ end
 -- Player related functions
 -- Checks if a player has admin privileges based on Config.AdminGroups
 -- @param playerId The server ID of the player to check.
--- @return boolean True if the player is considered an admin, false otherwise.
+-- @return boolean True if the player is considered an admin based on the configured method, false otherwise.
 function IsPlayerAdmin(playerId)
-    -- Ensure Config and AdminGroups are loaded
-    if not Config or not Config.AdminGroups then
-        Log("^1Warning: Config.AdminGroups not found for IsPlayerAdmin check.^7", 1)
-        return false -- Default to false if config is missing
-    end
     -- Ensure playerId is valid and player exists
     local player = tonumber(playerId)
     if not player or player <= 0 or not GetPlayerName(player) then return false end
 
-    -- Check using FiveM's built-in ACE permissions
-    for _, group in ipairs(Config.AdminGroups) do
-        if IsPlayerAceAllowed(player, "group." .. group) then
-            return true
-        end
+    -- Ensure Config and AdminGroups are loaded
+    if not Config or not Config.AdminGroups then
+        Log("^1Warning: Config.AdminGroups not found for IsPlayerAdmin check.^7", 1)
+        return false
     end
 
-    -- Add framework-specific checks if needed (examples commented out)
-    --[[
-        IMPLEMENTATION REQUIRED: Uncomment and adapt ONE of the following blocks
-        if you are using ESX or QBCore and want to check framework groups.
-        Ensure the export name is correct for your framework version.
+    local frameworkSetting = Config.PermissionsFramework or "ace" -- Default to "ace" if not set
 
-        -- Example ESX:
-        local ESX = exports['es_extended']:getSharedObject() -- Adjust export name if needed
+    -- --- ESX Check ---
+    local function checkESX()
         if ESX then
             local xPlayer = ESX.GetPlayerFromId(player)
             if xPlayer then
-                 for _, group in ipairs(Config.AdminGroups) do
-                     if xPlayer.getGroup() == group then return true end
-                 end
+                local playerGroup = xPlayer.getGroup()
+                for _, group in ipairs(Config.AdminGroups) do
+                    if playerGroup == group then return true end
+                end
+            else
+                Log("^1Warning: Could not get xPlayer object for player " .. player .. " in IsPlayerAdmin (ESX check).^7", 1)
+            end
+        else
+            if frameworkSetting == "esx" then -- Only warn if explicitly set to ESX
+                Log("^1Warning: Config.PermissionsFramework set to 'esx' but ESX object was not loaded. Cannot check permissions.^7", 1)
             end
         end
+        return false
+    end
 
-        -- Example QBCore:
-        -- Ensure the export name 'qb-core' and the path to player data/permissions are correct for your version.
-        local QBCore = exports['qb-core']:GetCoreObject()
+    -- --- QBCore Check ---
+    local function checkQBCore()
         if QBCore then
-            local qbPlayer = QBCore.Functions.GetPlayer(player)
-            if qbPlayer then
-                 for _, group in ipairs(Config.AdminGroups) do
-                     -- Option 1: Check QBCore permission system (Recommended if using qb-adminmenu or similar)
-                     -- if QBCore.Functions.HasPermission(player, group) then return true end
-
-                     -- Option 2: Check job/gang and grade/isboss (Adapt to your specific setup)
-                     -- if qbPlayer.PlayerData.job.name == group and qbPlayer.PlayerData.job.isboss then return true end
-                     -- if qbPlayer.PlayerData.gang.name == group and qbPlayer.PlayerData.gang.isboss then return true end
-                 end
+            for _, group in ipairs(Config.AdminGroups) do
+                if QBCore.Functions.HasPermission(player, group) then
+                    return true
+                end
+            end
+        else
+             if frameworkSetting == "qbcore" then -- Only warn if explicitly set to QBCore
+                Log("^1Warning: Config.PermissionsFramework set to 'qbcore' but QBCore object was not loaded. Cannot check permissions.^7", 1)
             end
         end
-    ]]
+        return false
+    end
 
-    -- Default: If no ACE permission or framework check matches, they are not considered admin by this function.
-    return false
+    -- --- ACE Check ---
+    local function checkACE()
+        for _, group in ipairs(Config.AdminGroups) do
+            if IsPlayerAceAllowed(player, "group." .. group) then
+                return true
+            end
+        end
+        return false
+    end
+
+    -- --- Custom Check ---
+    local function checkCustom()
+        Log("IsPlayerAdmin: Config.PermissionsFramework set to 'custom'. Implement your logic here.", 3)
+        --[[ IMPLEMENTATION REQUIRED: Replace 'return false' with your custom logic ]]
+        return false
+    end
+
+    -- --- Determine Check Order ---
+    if frameworkSetting == "esx" then
+        return checkESX()
+    elseif frameworkSetting == "qbcore" then
+        return checkQBCore()
+    elseif frameworkSetting == "custom" then
+        return checkCustom()
+    elseif frameworkSetting == "ace" then
+        -- If set to ACE (default), try detecting frameworks first for convenience
+        if ESX and checkESX() then return true end -- Check ESX first if detected
+        if QBCore and checkQBCore() then return true end -- Then check QBCore if detected
+        return checkACE() -- Fallback to ACE check
+    else
+        Log("^1Warning: Invalid Config.PermissionsFramework value: '" .. frameworkSetting .. "'. Defaulting to ACE check.^7", 1)
+        return checkACE() -- Fallback to ACE if invalid setting
+    end
 end
 
 
@@ -335,94 +393,129 @@ end
 -- ##   You **MUST** implement proper security measures yourself.                                    ##
 -- ##                                                                                                ##
 -- ####################################################################################################
+-- ##                                                                                                ##
+-- ##   ███████╗ ███████╗  ██████╗ ██╗   ██╗ ███████╗ ██╗   ██╗ ███████╗ ██╗ ███████╗ ███╗   ███╗    ##
+-- ##   ██╔════╝ ██╔════╝ ██╔════╝ ██║   ██║ ██╔════╝ ██║   ██║ ██╔════╝ ██║ ██╔════╝ ████╗ ████║    ##
+-- ##   ███████╗ ███████╗ ██║  ███╗ ██║   ██║ ███████╗ ██║   ██║ ███████╗ ██║ ███████╗ ██╔████╔██║    ##
+-- ##   ╚════██║ ╚════██║ ██║   ██║ ██║   ██║ ╚════██║ ██║   ██║ ╚════██║ ██║ ╚════██║ ██║╚██╔╝██║    ##
+-- ##   ███████║ ███████║ ╚██████╔╝ ╚██████╔╝ ███████║ ╚██████╔╝ ███████║ ██║ ███████║ ██║ ╚═╝ ██║    ##
+-- ##   ╚══════╝ ╚══════╝  ╚═════╝   ╚═════╝  ╚══════╝  ╚═════╝  ╚══════╝ ╚═╝ ╚══════╝ ╚═╝     ╚═╝    ##
+-- ##                                                                                                ##
+-- ##   Default Secure Token Implementation (HMAC-SHA256 via ox_lib)                                 ##
+-- ##   ------------------------------------------------------------------------------------------   ##
+-- ##   This section provides a default, secure method for validating client-server events using     ##
+-- ##   HMAC-SHA256 signing. It relies on the 'ox_lib' resource being present and started.           ##
+-- ##                                                                                                ##
+-- ##   **CRITICAL:** This system's security depends entirely on keeping `Config.SecuritySecret`     ##
+-- ##   in `config.lua` **SECRET** and **UNIQUE** to your server. Do not share it or use the default!##
+-- ##                                                                                                ##
+-- ##   How it works:                                                                                ##
+-- ##     1. Server generates a token containing a timestamp and a signature.                        ##
+-- ##     2. Signature is created by hashing ('playerId:timestamp') using the secret key.            ##
+-- ##     3. Client receives the token and sends it back with sensitive events.                      ##
+-- ##     4. Server validates the event by:                                                          ##
+-- ##        a) Checking if the timestamp is recent (prevents replay attacks).                       ##
+-- ##        b) Recalculating the signature using the received timestamp and player ID.              ##
+-- ##        c) Comparing the recalculated signature with the one sent by the client.                ##
+-- ##                                                                                                ##
+-- ##   Advanced users can replace these functions if they prefer a different security mechanism.    ##
+-- ##                                                                                                ##
+-- ####################################################################################################
 
--- Basic pseudo-HMAC function (**EXAMPLE ONLY - NOT CRYPTOGRAPHICALLY SECURE**)
--- This is **NOT** a real HMAC and provides **NO** security guarantees. Replace with proper crypto.
-local function PseudoHmac(key, message)
-    Log("^1SECURITY RISK: Using insecure PseudoHmac function. Replace with proper crypto (e.g., HMAC-SHA256). This offers NO real security.^7", 1)
-    local hash = 0
-    -- Simple hashing, easily predictable/breakable
-    for i = 1, string.len(message) do hash = (hash * 31 + string.byte(message, i)) % 1000000007 end
-    for i = 1, string.len(key) do hash = (hash * 31 + string.byte(key, i)) % 1000000007 end
-    return tostring(hash)
-end
-
--- Generates a time-based token using the **INSECURE** pseudo-HMAC example.
--- **THIS IS NOT SECURE. REPLACE THIS FUNCTION.**
+-- Generates a secure token table containing a timestamp and HMAC-SHA256 signature.
+-- Requires ox_lib and a properly configured Config.SecuritySecret.
+-- @param playerId The server ID of the player requesting a token.
+-- @return table A token table { timestamp = number, signature = string }, or nil on error.
 function GenerateSecurityToken(playerId)
-    Log("^1SECURITY RISK: Using insecure placeholder GenerateSecurityToken. Replace immediately.^7", 1)
-    if not Config or not Config.SecuritySecret or Config.SecuritySecret == "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" then
-        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot generate placeholder token.^7", 1)
+    if not lib or not lib.crypto or not lib.crypto.hmac or not lib.crypto.hmac.sha256 then
+        Log("^1SECURITY ERROR: ox_lib crypto functions not available. Cannot generate secure token. Ensure ox_lib is started and updated.^7", 1)
         return nil
     end
-    local timestamp = os.time()
-    local message = tostring(playerId) .. ":" .. tostring(timestamp)
-    local hash = PseudoHmac(Config.SecuritySecret, message) -- Uses insecure hash
-    local token = message .. ":" .. hash
-
-    -- Store the generated token's timestamp for validation window (part of the insecure mechanism)
-    if _G.PlayerMetrics and _G.PlayerMetrics[playerId] then
-        _G.PlayerMetrics[playerId].lastTokenTime = timestamp
+    if not Config or not Config.SecuritySecret or Config.SecuritySecret == "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" then
+        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot generate secure token.^7", 1)
+        return nil
     end
-    return token
+
+    local timestamp = os.time()
+    local message = tostring(playerId) .. ":" .. tostring(timestamp) -- Message to sign
+
+    -- Generate the HMAC-SHA256 signature
+    local success, signature = pcall(lib.crypto.hmac.sha256, Config.SecuritySecret, message)
+
+    if not success or not signature then
+        Log("^1SECURITY ERROR: Failed to generate HMAC signature: " .. tostring(signature) .. "^7", 1) -- signature holds error on pcall fail
+        return nil
+    end
+
+    -- Log("Generated secure token for " .. playerId, 4) -- Debugging only
+    return {
+        timestamp = timestamp,
+        signature = signature
+    }
 end
 
--- Validates a time-based token using the **INSECURE** pseudo-HMAC example.
--- **THIS IS NOT SECURE. REPLACE THIS FUNCTION.**
-function ValidateSecurityToken(playerId, token)
-    Log("^1SECURITY RISK: Using insecure placeholder ValidateSecurityToken. Replace immediately.^7", 1)
+-- Validates a secure token table received from the client.
+-- Requires ox_lib and a properly configured Config.SecuritySecret.
+-- @param playerId The server ID of the player sending the token.
+-- @param tokenData The token table { timestamp = number, signature = string } sent by the client.
+-- @return boolean True if the token is valid and within the time window, false otherwise.
+function ValidateSecurityToken(playerId, tokenData)
+    if not lib or not lib.crypto or not lib.crypto.hmac or not lib.crypto.hmac.sha256 then
+        Log("^1SECURITY ERROR: ox_lib crypto functions not available. Cannot validate secure token.^7", 1)
+        return false
+    end
     if not Config or not Config.SecuritySecret or Config.SecuritySecret == "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" then
-        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot validate placeholder token.^7", 1)
-        return false
-    end
-    if not token or type(token) ~= "string" then
-        Log("^1Invalid token type received from " .. playerId .. "^7", 1)
+        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot validate secure token.^7", 1)
         return false
     end
 
-    -- Split token into parts: playerID:timestamp:hash
-    local parts = {}
-    for part in string.gmatch(token, "[^:]+") do table.insert(parts, part) end
-
-    if #parts ~= 3 then
-        Log("^1Invalid token format received from " .. playerId .. " ('" .. token .. "')^7", 1)
+    -- Validate token structure
+    if not tokenData or type(tokenData) ~= "table" or not tokenData.timestamp or not tokenData.signature then
+        Log("^1Invalid token data structure received from player " .. playerId .. "^7", 1)
         return false
     end
 
-    local receivedPlayerId = tonumber(parts[1])
-    local receivedTimestamp = tonumber(parts[2])
-    local receivedHash = parts[3]
+    local receivedTimestamp = tonumber(tokenData.timestamp)
+    local receivedSignature = tokenData.signature
 
-    -- Basic validation
-    if not receivedPlayerId or receivedPlayerId ~= playerId or not receivedTimestamp or not receivedHash then
-        Log("^1Invalid token content received from " .. playerId .. " (PlayerID mismatch or missing parts)^7", 1)
-        return false
+    if not receivedTimestamp or type(receivedSignature) ~= "string" then
+         Log("^1Invalid token data types received from player " .. playerId .. "^7", 1)
+         return false
     end
 
-    -- Check timestamp window (e.g., +/- 60 seconds) - This is easily bypassed if attacker controls timestamp
+    -- Check timestamp window (e.g., +/- 60 seconds) to prevent replay attacks
     local currentTime = os.time()
+    local maxTimeDifference = 60 -- Allow 1 minute difference (adjust as needed)
     local timeDifference = math.abs(currentTime - receivedTimestamp)
-    local maxTimeDifference = 60 -- Allow 1 minute difference (adjust as needed, but doesn't fix underlying insecurity)
+
     if timeDifference > maxTimeDifference then
-        Log("^1Token timestamp mismatch for " .. playerId .. ". Diff: " .. timeDifference .. "s (Current: " .. currentTime .. ", Received: " .. receivedTimestamp .. ")^7", 1)
+        Log("^1Token timestamp expired/invalid for player " .. playerId .. ". Diff: " .. timeDifference .. "s (Max: " .. maxTimeDifference .. "s)^7", 1)
         return false
     end
 
-    -- Regenerate the expected hash using the insecure function
+    -- Reconstruct the exact message that should have been signed
     local message = tostring(playerId) .. ":" .. tostring(receivedTimestamp)
-    local expectedHash = PseudoHmac(Config.SecuritySecret, message) -- Uses insecure hash
 
-    -- Compare hashes
-    if expectedHash == receivedHash then
-        return true -- Token appears valid according to the *insecure* method
+    -- Recalculate the expected signature
+    local success, expectedSignature = pcall(lib.crypto.hmac.sha256, Config.SecuritySecret, message)
+
+    if not success or not expectedSignature then
+        Log("^1SECURITY ERROR: Failed to recalculate HMAC signature for validation: " .. tostring(expectedSignature) .. "^7", 1)
+        return false
+    end
+
+    -- Compare the recalculated signature with the received signature (Constant-time comparison is ideal but often overkill here)
+    if expectedSignature == receivedSignature then
+        -- Log("Token validated successfully for " .. playerId, 4) -- Debugging only
+        return true
     else
-        Log("^1Token hash mismatch for " .. playerId .. ". Expected: " .. expectedHash .. ", Received: " .. receivedHash .. "^7", 1)
+        Log("^1Token signature mismatch for player " .. playerId .. ". Expected: " .. expectedSignature .. ", Received: " .. receivedSignature .. "^7", 1)
         return false
     end
 end
 
 -- #############################################################################
--- ## END SECURITY WARNING BLOCK ##
+-- ## END SECURE TOKEN IMPLEMENTATION BLOCK ##
 -- #############################################################################
 
 
@@ -441,7 +534,8 @@ function GetDetectionSeverity(detectionType)
         resourceinjection = 75, -- Match detector name (from config key)
         entityspam = 35,
         explosionspam = 40,
-        menudetection = 60
+        menudetection = 60,
+        serverspeedcheck = 60 -- Severity for server-side speed check
         -- Add other detection types here
     }
     return severities[string.lower(detectionType)] or 20 -- Default severity
@@ -460,10 +554,13 @@ function IsHighRiskDetection(detectionType, detectionData)
         ["explosionspam"] = true,
         ["entityspam"] = true,        -- Add entity spam check
         ["godmode"] = true,           -- Persistent godmode is high risk
-        ["noclip"] = true             -- Persistent noclip is high risk
+        ["noclip"] = true,            -- Persistent noclip is high risk
+        ["serverspeedcheck"] = true   -- Server-side speed check is high risk
     }
     -- Add checks based on detectionData if needed (e.g., high confidence score)
-    -- Example: if dtLower == "speedhack" and detectionData and detectionData.multiplier > 2.0 then return true end
+    -- Example: if dtLower == "weaponmodification" and detectionData and detectionData.serverValidated then return true end
+    if dtLower == "weaponmodification" and detectionData and detectionData.serverValidated then return true end -- Weapon mod confirmed by server is high risk
+
     return highRiskTypes[dtLower] or false
 end
 
@@ -475,11 +572,14 @@ function IsConfirmedCheat(detectionType, detectionData)
     -- This is a basic implementation. Refine based on server needs and detection data.
     local dtLower = string.lower(detectionType or "")
     local confirmedCheatTypes = {
-        ["resourceinjection"] = true -- Assume server-verified resource injection is confirmed
+        ["resourceinjection"] = true, -- Assume server-verified resource injection is confirmed
+        ["serverspeedcheck"] = true   -- Server-side speed check is considered confirmed
         -- Add other types that are considered definitively cheating without needing AI/multiple flags
     }
     -- Add checks based on detectionData if needed
-    -- Example: if dtLower == "weaponmodification" and detectionData and detectionData.damageMultiplier > 5.0 then return true end
+    -- Example: if dtLower == "weaponmodification" and detectionData and detectionData.serverValidated then return true end
+    if dtLower == "weaponmodification" and detectionData and detectionData.serverValidated then return true end -- Weapon mod confirmed by server is confirmed cheat
+
     return confirmedCheatTypes[dtLower] or false
 end
 
@@ -537,6 +637,152 @@ function StoreDetection(playerId, detectionType, detectionData)
     end
 end
 _G.StoreDetection = StoreDetection -- Expose globally
+
+
+-- Process Detection Logic (Relies on global functions from globals.lua)
+-- This function coordinates the response to a detection event.
+function ProcessDetection(playerId, detectionType, detectionData)
+    -- Check for valid input
+    if not playerId or playerId <= 0 or not detectionType then
+        Log("^1[NexusGuard] Invalid arguments received by ProcessDetection.^7", 1)
+        return
+    end
+    local playerName = GetPlayerName(playerId) or "Unknown (" .. playerId .. ")"
+
+    -- Initial Log
+    local dataStrForLog = (json and json.encode(detectionData)) or (type(detectionData) == "string" and detectionData or "{}")
+    Log('^1[NexusGuard]^7 Detection: ' .. playerName .. ' (ID: '..playerId..') - Type: ' .. detectionType .. ' - Data: ' .. dataStrForLog .. "^7", 1)
+
+    -- Server-Side Validation Flags
+    local serverValidated = false -- Flag to indicate if server-side checks confirm the cheat
+
+    -- --- Server-Side Validation Checks ---
+    -- Example: Weapon Damage Validation
+    if detectionType == "weaponModification" and type(detectionData) == "table" and detectionData.type == "damage" then
+        local weaponHash = detectionData.weaponHash
+        local detectedDamage = detectionData.detectedValue
+        local clientBaseline = detectionData.baselineValue -- Client's reported baseline
+        local serverBaseline = Config.WeaponBaseDamage and Config.WeaponBaseDamage[weaponHash]
+
+        if serverBaseline then
+            local serverThresholdMultiplier = (Config.Thresholds and Config.Thresholds.weaponDamageMultiplier) or 1.5 -- Use same threshold for now, could be separate
+            local serverDamageLimit = serverBaseline * serverThresholdMultiplier
+
+            if detectedDamage > serverDamageLimit then
+                serverValidated = true -- Server confirms damage is too high based on its known baseline
+                Log('^1[NexusGuard Server Check]^7 Weapon damage CONFIRMED for ' .. playerName .. ' (Weapon: ' .. weaponHash .. '). Detected: ' .. detectedDamage .. ', Server Baseline: ' .. serverBaseline .. ', Limit: ' .. serverDamageLimit .. '^7', 1)
+                -- Optionally adjust detectionData or add a server validation flag
+                detectionData.serverValidated = true
+                detectionData.serverBaseline = serverBaseline
+                detectionData.serverLimit = serverDamageLimit
+            else
+                 Log('^3[NexusGuard Server Check]^7 Weapon damage for ' .. playerName .. ' within server limits. Detected: ' .. detectedDamage .. ', Server Limit: ' .. serverDamageLimit .. '^7', 3)
+            end
+        else
+             Log('^3[NexusGuard Server Check]^7 No server baseline damage found for weapon ' .. weaponHash .. '. Cannot validate damage.^7', 3)
+        end
+    end
+    -- Add other server-side validation checks here (e.g., speed check results if implemented differently)
+
+    -- Store detection in database if enabled (Use global StoreDetection)
+    if Config.Database and Config.Database.enabled and Config.Database.storeDetectionHistory then
+        if _G.StoreDetection then _G.StoreDetection(playerId, detectionType, detectionData) -- Pass potentially modified detectionData
+        else Log("^1[NexusGuard] StoreDetection function missing, cannot store detection.^7", 1) end
+    end
+
+    -- Record detection in player's history (Use global PlayerMetrics table)
+    if _G.PlayerMetrics and _G.PlayerMetrics[playerId] then
+        local metrics = _G.PlayerMetrics[playerId]
+        if not metrics.detections then metrics.detections = {} end
+        table.insert(metrics.detections, {
+            type = detectionType,
+            data = detectionData, -- Store potentially modified detectionData
+            timestamp = os.time(),
+            serverValidated = serverValidated -- Store server validation result
+        })
+
+        -- Update trust score based on detection severity (Use global GetDetectionSeverity)
+        local severityImpact = (_G.GetDetectionSeverity and _G.GetDetectionSeverity(detectionType)) or 20
+        if serverValidated then severityImpact = severityImpact * 1.5 end -- Increase impact if server validated
+        metrics.trustScore = math.max(0, (metrics.trustScore or 100) - severityImpact)
+        Log('^3[NexusGuard]^7 Player ' .. playerName .. ' trust score updated to: ' .. string.format("%.2f", metrics.trustScore) .. "^7", 2)
+    else
+        Log("^1Warning: PlayerMetrics table not found for player " .. playerId .. " during detection processing.^7", 1)
+    end
+
+    -- AI-based detection analysis (Use global AI functions - PLACEHOLDERS)
+    if Config.AI and Config.AI.enabled then
+        if _G.ProcessAIVerification then
+            local aiVerdict = _G.ProcessAIVerification(playerId, detectionType, detectionData) -- Pass potentially modified detectionData
+            if aiVerdict then -- Ensure verdict is not nil
+                Log('^3[NexusGuard]^7 AI Verdict: ' .. (json and json.encode(aiVerdict) or "Error encoding verdict") .. "^7", 3) -- Log AI verdict
+                if aiVerdict.confidence and aiVerdict.confidence > (Config.Thresholds.aiDecisionConfidenceThreshold or 0.75) then
+                    if aiVerdict.action == 'ban' then
+                        Log("^1[NexusGuard] AI Ban Triggered for " .. playerName .. " (Type: " .. detectionType .. ", Confidence: " .. aiVerdict.confidence .. ")^7", 1)
+                        if _G.BanPlayer then _G.BanPlayer(playerId, 'AI-confirmed cheat: ' .. detectionType) end
+                        return -- Stop further processing if banned by AI
+                    elseif aiVerdict.action == 'kick' then
+                        Log("^1[NexusGuard] AI Kick Triggered for " .. playerName .. " (Type: " .. detectionType .. ", Confidence: " .. aiVerdict.confidence .. ")^7", 1)
+                        DropPlayer(playerId, Config.KickMessage or "Kicked by Anti-Cheat (AI).")
+                        return -- Stop further processing if kicked by AI
+                    end
+                end
+            else
+                 Log("^1[NexusGuard] AI verification process returned nil verdict for " .. playerName .. "^7", 1)
+            end
+        else
+             Log("^1[NexusGuard] AI enabled but ProcessAIVerification function not found! Cannot perform AI analysis.^7", 1)
+        end
+    end
+
+    -- Rule-based detection handling
+    if Config.Actions then
+        -- Handle detection based on configuration (Use global helper functions)
+        -- Use serverValidated flag to potentially upgrade suspicion to confirmed
+        local confirmed = serverValidated or (_G.IsConfirmedCheat and _G.IsConfirmedCheat(detectionType, detectionData)) or false
+        local highRisk = (_G.IsHighRiskDetection and _G.IsHighRiskDetection(detectionType, detectionData)) or false
+
+        if Config.Actions.banOnConfirmed and confirmed then
+            local banReason = (serverValidated and 'Server-confirmed cheat: ' or 'Confirmed cheat: ') .. detectionType
+            Log("^1[NexusGuard] " .. (serverValidated and 'Server-Confirmed' or 'Confirmed') .. " Cheat Ban Triggered for " .. playerName .. " (Type: " .. detectionType .. ")^7", 1)
+            if _G.BanPlayer then _G.BanPlayer(playerId, banReason) end
+            return -- Stop further processing if banned
+        elseif Config.Actions.kickOnSuspicion and highRisk then
+             Log("^1[NexusGuard] High Risk Kick Triggered for " .. playerName .. " (Type: " .. detectionType .. ")^7", 1)
+             -- Optionally trigger screenshot before kick
+             if Config.ScreenCapture and Config.ScreenCapture.enabled and Config.ScreenCapture.includeWithReports then
+                 if _G.EventRegistry then _G.EventRegistry.TriggerClientEvent('ADMIN_REQUEST_SCREENSHOT', playerId) end
+             end
+             DropPlayer(playerId, Config.KickMessage or "Kicked for suspicious activity.")
+             return -- Stop further processing if kicked
+        elseif Config.ScreenCapture and Config.ScreenCapture.enabled and Config.ScreenCapture.includeWithReports and (highRisk or confirmed) then
+            -- Trigger screenshot for high risk or confirmed cheats if not already kicked/banned
+             Log("^2[NexusGuard] Requesting screenshot for high risk/confirmed detection: " .. playerName .. " (Type: " .. detectionType .. ")^7", 2)
+             if _G.EventRegistry then _G.EventRegistry.TriggerClientEvent('ADMIN_REQUEST_SCREENSHOT', playerId) end
+        end
+
+        -- Notify admins (Use local NotifyAdmins function)
+        if Config.Actions.reportToAdminsOnSuspicion then
+            -- Add server validation status to notification data
+            local notifyData = detectionData
+            if type(notifyData) ~= "table" then notifyData = { clientData = notifyData } end -- Ensure it's a table
+            notifyData.serverValidated = serverValidated
+            NotifyAdmins(playerId, detectionType, notifyData)
+        end
+    end
+
+    -- Log to Discord (Use global SendToDiscord)
+    if Config.Discord and Config.Discord.enabled and _G.SendToDiscord then
+        local discordData = detectionData
+        if type(discordData) ~= "table" then discordData = { clientData = discordData } end
+        discordData.serverValidated = serverValidated -- Add validation status
+        local dataStr = (json and json.encode(discordData)) or "{}"
+        local alertTitle = (serverValidated and 'Server-Confirmed Detection Alert' or 'Detection Alert')
+        _G.SendToDiscord("general", alertTitle, playerName .. ' (ID: '..playerId..') - Type: ' .. detectionType .. ' - Data: ' .. dataStr, Config.Discord.webhooks and Config.Discord.webhooks.general)
+    end
+end
+-- Expose ProcessDetection globally AFTER it's defined
+_G.ProcessDetection = ProcessDetection
 
 
 -- #############################################################################

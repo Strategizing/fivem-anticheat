@@ -89,19 +89,33 @@ function Detector.Check()
 
         -- Compare current damage against the stored baseline/default
         if storedStats.baseDamage > 0 and currentDamage > (storedStats.baseDamage * damageThresholdMultiplier) then
+            local details = {
+                type = "damage",
+                weaponHash = currentWeaponHash,
+                detectedValue = currentDamage,
+                baselineValue = storedStats.baseDamage,
+                clientThreshold = damageThresholdMultiplier
+            }
             if _G.NexusGuard and _G.NexusGuard.ReportCheat then
-                _G.NexusGuard:ReportCheat(DetectorName, "Weapon damage modified: " .. currentDamage .. " (Expected baseline: ~" .. storedStats.baseDamage .. ", Threshold: x" .. damageThresholdMultiplier .. ")")
+                _G.NexusGuard:ReportCheat(DetectorName, details)
             else
-                print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation: Weapon damage modified: " .. currentDamage .. " (Expected baseline: ~" .. storedStats.baseDamage .. ", Threshold: x" .. damageThresholdMultiplier .. ") (NexusGuard global unavailable)")
+                print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation (Damage): " .. json.encode(details) .. " (NexusGuard global unavailable)")
             end
         end
 
         -- Compare current clip size against the stored baseline/default
         if storedStats.baseClipSize > 0 and currentClipSize > (storedStats.baseClipSize * clipSizeThresholdMultiplier) then
+             local details = {
+                type = "clipSize",
+                weaponHash = currentWeaponHash,
+                detectedValue = currentClipSize,
+                baselineValue = storedStats.baseClipSize,
+                clientThreshold = clipSizeThresholdMultiplier
+            }
              if _G.NexusGuard and _G.NexusGuard.ReportCheat then
-                _G.NexusGuard:ReportCheat(DetectorName, "Weapon clip size modified: " .. currentClipSize .. " (Expected baseline: ~" .. storedStats.baseClipSize .. ", Threshold: x" .. clipSizeThresholdMultiplier .. ")")
+                _G.NexusGuard:ReportCheat(DetectorName, details)
             else
-                print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation: Weapon clip size modified: " .. currentClipSize .. " (Expected baseline: ~" .. storedStats.baseClipSize .. ", Threshold: x" .. clipSizeThresholdMultiplier .. ") (NexusGuard global unavailable)")
+                print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation (Clip Size): " .. json.encode(details) .. " (NexusGuard global unavailable)")
             end
         end
     end
