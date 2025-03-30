@@ -6,6 +6,7 @@ local DetectionHistory = {}
 local PlayerMetrics = {}
 local AIModelCache = {}
 local ClientsLoaded = {}
+local OnlineAdmins = {} -- Table to store server IDs of online admins
 
 -- Add this after loading configs
 function ValidateConfig()
@@ -52,12 +53,13 @@ AddEventHandler('playerConnecting', function(playerName, setKickReason, deferral
     local source = source
     local license = GetPlayerIdentifierByType(source, 'license')
     local ip = GetPlayerEndpoint(source)
-    
+    local isAdmin = IsPlayerAdmin(source) -- Check admin status early
+
     deferrals.defer()
     deferrals.update('Checking your profile against our anti-cheat database...')
-    
+
     -- Check if player is banned
-    Citizen.Wait(500)
+    Citizen.Wait(200) -- Reduced wait slightly
     if IsPlayerBanned(license, ip) then
         deferrals.done(Config.BanMessage)
         SendToDiscord('Connection Rejected', playerName .. ' attempted to connect but is banned')
@@ -77,9 +79,16 @@ AddEventHandler('playerConnecting', function(playerName, setKickReason, deferral
         trustScore = 100.0,
         securityToken = nil,
         explosions = {},
-        entities = {}
+        entities = {},
+        isAdmin = isAdmin -- Store admin status
     }
-    
+
+    -- Add to online admin list if applicable
+    if isAdmin then
+        OnlineAdmins[source] = true
+        print("^2[NexusGuard]^7 Admin connected: " .. playerName .. " (ID: " .. source .. ")")
+    end
+
     deferrals.done()
 end)
 
@@ -91,8 +100,13 @@ AddEventHandler('playerDropped', function(reason)
     if Config.Database and Config.Database.enabled and PlayerMetrics[source] then
         SavePlayerMetrics(source)
     end
-    
+    local playerName = GetPlayerName(source) or "Unknown"
+
     -- Clean up player data
+    if PlayerMetrics[source] and PlayerMetrics[source].isAdmin then
+        OnlineAdmins[source] = nil -- Remove from admin list
+        print("^2[NexusGuard]^7 Admin disconnected: " .. playerName .. " (ID: " .. source .. ")")
+    end
     PlayerMetrics[source] = nil
     ClientsLoaded[source] = nil
 end)
@@ -435,18 +449,15 @@ end
 -- Send notification to online admins
 function NotifyAdmins(playerId, detectionType, detectionData)
     local playerName = GetPlayerName(playerId) or "Unknown"
-    local message = '^1[NexusGuard]^7 Detection: ' .. playerName .. ' - ' .. detectionType
-    
-    -- Get all players safely
-    local players = SafeGetPlayers()
-    
-    -- Send to all admins
-    for _, adminId in ipairs(players) do
-        local adminIdNum = tonumber(adminId)
-        if adminIdNum and IsPlayerAdmin(adminIdNum) then
-            TriggerClientEvent('nexusguard:adminNotification', adminIdNum, {
+    local message = '^1[NexusGuard]^7 Detection: ' .. playerName .. ' (ID: ' .. playerId .. ') - ' .. detectionType .. ' - Data: ' .. json.encode(detectionData)
+
+    -- Send to all online admins stored in our list
+    for adminId, _ in pairs(OnlineAdmins) do
+        -- Ensure the admin player still exists before sending
+        if GetPlayerName(adminId) then
+            TriggerClientEvent('nexusguard:adminNotification', adminId, {
                 player = playerName,
-                id = playerId,
+                playerId = playerId, -- Send player ID as well
                 type = detectionType,
                 data = detectionData,
                 timestamp = os.time()

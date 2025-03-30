@@ -236,33 +236,33 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         Updates Discord status with player info
     ]]
     function NexusGuard:UpdateRichPresence()
-        if not Config.Discord or not Config.Discord.RichPresence or 
-           not Config.Discord.RichPresence.Enabled then
+        -- Cache config table locally for minor optimization
+        local rpConfig = Config and Config.Discord and Config.Discord.RichPresence
+
+        if not rpConfig or not rpConfig.Enabled then
             return
         end
-        
+
         -- Set rich presence assets if configured
-        if Config.Discord.RichPresence.LargeImage then
-            SetDiscordRichPresenceAsset(Config.Discord.RichPresence.LargeImage)
-            
-            if Config.Discord.RichPresence.LargeImageText then
-                SetDiscordRichPresenceAssetText(Config.Discord.RichPresence.LargeImageText)
+        if rpConfig.LargeImage then
+            SetDiscordRichPresenceAsset(rpConfig.LargeImage)
+            if rpConfig.LargeImageText then
+                SetDiscordRichPresenceAssetText(rpConfig.LargeImageText)
             end
         end
-        
-        if Config.Discord.RichPresence.SmallImage then
-            SetDiscordRichPresenceAssetSmall(Config.Discord.RichPresence.SmallImage)
-            
-            if Config.Discord.RichPresence.SmallImageText then
-                SetDiscordRichPresenceAssetSmallText(Config.Discord.RichPresence.SmallImageText)
+
+        if rpConfig.SmallImage then
+            SetDiscordRichPresenceAssetSmall(rpConfig.SmallImage)
+            if rpConfig.SmallImageText then
+                SetDiscordRichPresenceAssetSmallText(rpConfig.SmallImageText)
             end
         end
-        
+
         -- Set action buttons
-        if Config.Discord.RichPresence.buttons then
-            for i, button in ipairs(Config.Discord.RichPresence.buttons) do
-                if button.label and button.url and i <= 2 then
-                    SetDiscordRichPresenceAction(i-1, button.label, button.url)
+        if rpConfig.buttons then
+            for i, button in ipairs(rpConfig.buttons) do
+                if button.label and button.url and i <= 2 then -- Discord allows max 2 buttons
+                    SetDiscordRichPresenceAction(i - 1, button.label, button.url)
                 end
             end
         end

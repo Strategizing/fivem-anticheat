@@ -45,14 +45,12 @@ server_scripts {
     'server/handlers/*.lua'
 }
 
-ui_page 'ui/index.html'
-
 files {
-    'ui/index.html',
-    'ui/css/*.css',
-    'ui/js/*.js',
-    'ui/img/*.png',
-    'ui/img/discord/*.png',
+    -- 'ui/index.html', -- Removed as file doesn't exist
+    -- 'ui/css/*.css', -- Removed as file doesn't exist
+    -- 'ui/js/*.js', -- Removed as file doesn't exist
+    -- 'ui/img/*.png', -- Removed as file doesn't exist
+    -- 'ui/img/discord/*.png', -- Removed as file doesn't exist
     'ml_models/*.json',
     'discord_bot/config.json'
 }

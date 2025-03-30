@@ -18,49 +18,30 @@ function Detector.Initialize()
     return true
 end
 
--- Start the detector (begin detecting)
+-- Start the detector (Called by Registry)
+-- The registry now handles the thread creation loop.
 function Detector.Start()
-    if Detector.active then return false end
-
+    if Detector.active then return false end -- Already active
     Detector.active = true
-    Citizen.CreateThread(function()
-        while Detector.active do
-            local currentTime = GetGameTimer()
-
-            -- Only run if enough time has passed
-            if currentTime - Detector.lastCheck > Detector.interval then
-                -- Use SafeDetect wrapper if available in NexusGuard global
-                if _G.NexusGuard and _G.NexusGuard.SafeDetect then
-                     _G.NexusGuard:SafeDetect(Detector.Check, DetectorName)
-                else
-                    -- Fallback to direct call if SafeDetect is not ready/available
-                    local success, err = pcall(Detector.Check)
-                    if not success then
-                        print("^1[NexusGuard:" .. DetectorName .. "]^7 Error: " .. tostring(err))
-                    end
-                end
-                Detector.lastCheck = currentTime
-            end
-
-            -- Adjust wait time dynamically based on interval to reduce unnecessary checks
-            local waitTime = math.max(100, Detector.interval / 10)
-             Citizen.Wait(waitTime)
-        end
-    end)
-
-    print("^2[NexusGuard:" .. DetectorName .. "]^7 Detector started")
-    return true
+    -- No need to create thread here, registry does it.
+    -- Print statement moved to registry for consistency.
+    return true -- Indicate success
 end
 
--- Stop the detector
+-- Stop the detector (Called by Registry)
+-- The registry relies on this setting the active flag to false.
 function Detector.Stop()
+    if not Detector.active then return false end -- Already stopped
     Detector.active = false
-    print("^2[NexusGuard:" .. DetectorName .. "]^7 Detector stopped")
-    return true
+    -- Print statement moved to registry for consistency.
+    return true -- Indicate success
 end
 
 -- Check for violations (Moved logic from client_main.lua)
 function Detector.Check()
+    -- Cache config values locally
+    local healthRegenThreshold = (Config and Config.Thresholds and Config.Thresholds.healthRegenerationRate) or 2.0
+
     local ped = PlayerPedId()
     local player = PlayerId()
 
@@ -96,13 +77,11 @@ function Detector.Check()
     -- Use local state for health tracking
     if Detector.state.health < health and health <= maxHealth then -- Only track regeneration up to max health
         local healthIncrease = health - Detector.state.health
-        -- Use threshold from global config if available
-        local threshold = (Config and Config.Thresholds and Config.Thresholds.healthRegenerationRate) or 2.0
 
         -- If health increased too rapidly without medical item use (basic check)
-        if healthIncrease > threshold then
+        if healthIncrease > healthRegenThreshold then
              if _G.NexusGuard and _G.NexusGuard.ReportCheat then
-                _G.NexusGuard:ReportCheat(DetectorName, "Abnormal health regeneration: +" .. string.format("%.1f", healthIncrease) .. " HP")
+                _G.NexusGuard:ReportCheat(DetectorName, "Abnormal health regeneration: +" .. string.format("%.1f", healthIncrease) .. " HP (Threshold: " .. healthRegenThreshold .. ")")
             else
                 print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation: Abnormal health regeneration: +" .. string.format("%.1f", healthIncrease) .. " HP (NexusGuard global unavailable)")
             end

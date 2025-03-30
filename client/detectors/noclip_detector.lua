@@ -15,49 +15,30 @@ function Detector.Initialize()
     return true
 end
 
--- Start the detector (begin detecting)
+-- Start the detector (Called by Registry)
+-- The registry now handles the thread creation loop.
 function Detector.Start()
-    if Detector.active then return false end
-
+    if Detector.active then return false end -- Already active
     Detector.active = true
-    Citizen.CreateThread(function()
-        while Detector.active do
-            local currentTime = GetGameTimer()
-
-            -- Only run if enough time has passed
-            if currentTime - Detector.lastCheck > Detector.interval then
-                -- Use SafeDetect wrapper if available in NexusGuard global
-                if _G.NexusGuard and _G.NexusGuard.SafeDetect then
-                     _G.NexusGuard:SafeDetect(Detector.Check, DetectorName)
-                else
-                    -- Fallback to direct call if SafeDetect is not ready/available
-                    local success, err = pcall(Detector.Check)
-                    if not success then
-                        print("^1[NexusGuard:" .. DetectorName .. "]^7 Error: " .. tostring(err))
-                    end
-                end
-                Detector.lastCheck = currentTime
-            end
-
-            -- Adjust wait time dynamically based on interval
-            local waitTime = math.max(100, Detector.interval / 10)
-             Citizen.Wait(waitTime)
-        end
-    end)
-
-    print("^2[NexusGuard:" .. DetectorName .. "]^7 Detector started")
-    return true
+    -- No need to create thread here, registry does it.
+    -- Print statement moved to registry for consistency.
+    return true -- Indicate success
 end
 
--- Stop the detector
+-- Stop the detector (Called by Registry)
+-- The registry relies on this setting the active flag to false.
 function Detector.Stop()
+    if not Detector.active then return false end -- Already stopped
     Detector.active = false
-    print("^2[NexusGuard:" .. DetectorName .. "]^7 Detector stopped")
-    return true
+    -- Print statement moved to registry for consistency.
+    return true -- Indicate success
 end
 
 -- Check for violations (Moved logic from client_main.lua)
 function Detector.Check()
+    -- Cache config values locally
+    local noclipTolerance = (Config and Config.Thresholds and Config.Thresholds.noclipTolerance) or 3.0
+
     local ped = PlayerPedId()
 
     -- Safety checks
@@ -74,8 +55,6 @@ function Detector.Check()
     if IsPedRagdoll(ped) then return end -- Ignore if ragdolling
 
     local pos = GetEntityCoords(ped)
-    -- Use threshold from global config if available
-    local noclipTolerance = (Config and Config.Thresholds and Config.Thresholds.noclipTolerance) or 3.0
 
     -- Ensure valid position
     if not pos or not pos.x then return end
