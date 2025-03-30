@@ -12,30 +12,6 @@ AddEventHandler('explosionEvent', function(sender, ev) HandleExplosionEvent(send
 local ClientsLoaded = {} -- Tracks clients that have completed the initial hash check
 local OnlineAdmins = {} -- Table to store server IDs of online admins
 
--- Validate the main Config table (loaded via manifest)
-function ValidateConfig()
-    -- Apply schema validation if ConfigValidator exists
-    if _G.ConfigValidator then
-        -- Assuming ConfigValidator modifies the global Config table directly or returns it
-        _G.Config = _G.ConfigValidator.Apply(_G.Config or {})
-        print('^2[NexusGuard]^7 Schema validation applied to config.')
-    else
-        -- Fallback to basic validation (ensure Config exists and has key tables)
-        _G.Config = _G.Config or {}
-        if not Config.AI then Config.AI = {enabled = false} end
-        if not Config.Actions then Config.Actions = {
-            kickOnSuspicion = true,
-            banOnConfirmed = true,
-            reportToAdminsOnSuspicion = true
-        } end
-        if not Config.ScreenCapture then Config.ScreenCapture = {enabled = false} end
-        if not Config.Database then Config.Database = {enabled = false, historyDuration = 30} end
-        if not Config.Thresholds then Config.Thresholds = {aiDecisionConfidenceThreshold = 0.75} end
-        if not Config.AdminGroups then Config.AdminGroups = {"admin", "superadmin"} end
-        print('^2[NexusGuard]^7 Basic configuration validation complete.')
-    end
-end
-
 -- Initialize the anti-cheat on resource start
 AddEventHandler('onResourceStart', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
@@ -54,8 +30,9 @@ AddEventHandler('onResourceStart', function(resourceName)
     if not _G.StoreDetection then Log("^3[NexusGuard] Warning: _G.StoreDetection function not found. Detections will not be stored.^7", 2) end
     if not _G.SavePlayerMetrics then Log("^3[NexusGuard] Warning: _G.SavePlayerMetrics function not found. Session metrics will not be saved.^7", 2) end
 
-    -- Validate Config structure
-    ValidateConfig()
+    -- Basic Config Check (Ensure Config table exists)
+    _G.Config = _G.Config or {}
+    Log("^2[NexusGuard]^7 Basic configuration table check complete. Ensure values are set correctly in config.lua.^7", 2)
 
     -- Load initial ban list (if function exists)
     if _G.LoadBanList then _G.LoadBanList(true) end -- Force load on start
@@ -198,9 +175,9 @@ function RegisterNexusGuardServerEvents()
         if not source or source <= 0 then return end -- Ignore invalid source
         local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
 
-        -- Validate client hash (Uses global ValidateClientHash - INSECURE PLACEHOLDER)
-        -- Note: This check provides minimal security.
-        if _G.ValidateClientHash and _G.ValidateClientHash(clientHash) then
+        -- Client hash validation was removed as it's ineffective.
+        -- Proceed directly to token generation after basic checks.
+        if clientHash and type(clientHash) == "string" then -- Basic check that *something* was sent
             ClientsLoaded[source] = true -- Mark client as having passed initial check
             -- Generate token (Uses global GenerateSecurityToken - INSECURE PLACEHOLDER)
             local token = _G.GenerateSecurityToken and _G.GenerateSecurityToken(source)
@@ -212,10 +189,10 @@ function RegisterNexusGuardServerEvents()
                  DropPlayer(source, "Anti-Cheat initialization failed (Token Generation).")
             end
         else
-            Log('^1[NexusGuard]^7 Invalid client hash received from ' .. playerName .. '. Kicking.^7', 1)
-            -- Ban or kick player for potentially modified client (Use global BanPlayer)
-            if _G.BanPlayer then _G.BanPlayer(source, 'Modified client detected (Invalid Hash)')
-            else DropPlayer(source, "Anti-Cheat validation failed (Client Hash).") end
+             Log('^1[NexusGuard]^7 Invalid or missing client hash received from ' .. playerName .. '. Kicking.^7', 1)
+             -- Ban or kick player for potentially modified client (Use global BanPlayer)
+             if _G.BanPlayer then _G.BanPlayer(source, 'Modified client detected (Invalid Handshake)')
+             else DropPlayer(source, "Anti-Cheat validation failed (Client Handshake).") end
         end
     end)
 
@@ -526,14 +503,8 @@ function NotifyAdmins(playerId, detectionType, detectionData)
                     timestamp = os.time()
                  })
              else
-                -- Fallback if EventRegistry failed (though unlikely if we got this far)
-                TriggerClientEvent('nexusguard:adminNotification', adminId, {
-                    player = playerName,
-                    playerId = playerId,
-                    type = detectionType,
-                    data = detectionData,
-                    timestamp = os.time()
-                })
+                 -- EventRegistry is required for client communication.
+                 Log("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot send admin notification to client " .. adminId .. "^7", 1)
              end
         else
             -- Admin might have disconnected between checks, remove them

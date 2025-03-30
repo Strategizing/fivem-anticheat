@@ -336,13 +336,6 @@ end
 -- ##                                                                                                ##
 -- ####################################################################################################
 
--- Placeholder: Client hash validation - **INEFFECTIVE AND SHOULD NOT BE RELIED UPON.**
--- A client can easily send any hash they want. This provides no real security.
-function ValidateClientHash(hash)
-    Log("^1SECURITY RISK: Using ineffective ValidateClientHash placeholder. This check is easily bypassed.^7", 1)
-    return hash and type(hash) == "string" and string.len(hash) > 10 -- Basic format check only
-end
-
 -- Basic pseudo-HMAC function (**EXAMPLE ONLY - NOT CRYPTOGRAPHICALLY SECURE**)
 -- This is **NOT** a real HMAC and provides **NO** security guarantees. Replace with proper crypto.
 local function PseudoHmac(key, message)
@@ -653,15 +646,14 @@ function HandleExplosionEvent(sender, ev)
     end
 end
 
--- Placeholder: Needs implementation - Be VERY careful with performance here.
+-- Placeholder: Needs implementation - **USE WITH EXTREME CAUTION DUE TO PERFORMANCE IMPACT.**
+-- Tracking all entity creations can severely impact server performance.
+-- If implemented, it MUST be heavily filtered to only track specific, high-risk entity models or types.
 -- @param entity The handle of the created entity.
 function HandleEntityCreation(entity)
-    -- This requires careful implementation to avoid performance issues
-    -- and false positives. Consider what entities are relevant to track (e.g., specific props, vehicles).
-    -- Avoid tracking every single entity. Filter by type or model hash.
-    -- Log("Placeholder: HandleEntityCreation called for entity " .. entity, 3)
+    -- Log("Placeholder: HandleEntityCreation called for entity " .. entity, 4) -- Debug log only
     --[[
-        IMPLEMENTATION REQUIRED (Example structure):
+        IMPLEMENTATION REQUIRED (Example structure - Requires heavy filtering):
         local entityType = GetEntityType(entity)
         local model = GetEntityModel(entity)
         -- Check if model is blacklisted or type is suspicious
@@ -881,7 +873,7 @@ _G.IsPlayerBanned = IsPlayerBanned
 _G.StorePlayerBan = StorePlayerBan
 _G.BanPlayer = BanPlayer -- Expose the new BanPlayer function
 _G.IsPlayerAdmin = IsPlayerAdmin
-_G.ValidateClientHash = ValidateClientHash
+-- _G.ValidateClientHash = ValidateClientHash -- Removed as it's ineffective
 _G.GenerateSecurityToken = GenerateSecurityToken
 _G.ValidateSecurityToken = ValidateSecurityToken
 _G.GetDetectionSeverity = GetDetectionSeverity

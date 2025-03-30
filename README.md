@@ -7,7 +7,7 @@ NexusGuard is a modular, event-driven anti-cheat framework designed for FiveM se
 ## Features (Core Framework)
 
 *   **Modular Detector System**: Easily enable, disable, or create custom detection modules (`client/detectors/`).
-*   **Event-Driven Architecture**: Uses standardized events for communication (via `shared/EventRegistry.lua`).
+*   **Event-Driven Architecture**: Uses standardized events for communication via `shared/EventRegistry.lua` (Required).
 *   **Client & Server Logic**: Basic separation of client-side checks and server-side validation/actions.
 *   **Configuration**: Extensive configuration options via `config.lua`.
 *   **Basic Detections Included**: Examples for God Mode, Speed Hack, NoClip, Teleport, Weapon Mods, Resource Monitoring, Menu Keybinds.
@@ -32,7 +32,7 @@ NexusGuard is a modular, event-driven anti-cheat framework designed for FiveM se
 
 1.  **Download:** Download the latest release (v0.6.9) of NexusGuard.
 2.  **Extract:** Extract the `NexusGuard` folder into your server's `resources` directory.
-3.  **Dependencies:** Ensure **oxmysql** and **screenshot-basic** are installed and listed in your `server.cfg` to start *before* NexusGuard. Install optional dependencies as needed.
+3.  **Dependencies:** Ensure **oxmysql** and **screenshot-basic** are installed and listed in your `server.cfg` to start *before* NexusGuard. Install optional dependencies (like `chat`) as needed. **Note:** The `shared/event_registry.lua` included in this resource is essential for its operation.
 4.  **Database Setup:**
     *   Ensure you have a MySQL database server accessible by your FiveM server.
     *   Import the `NexusGuard/sql/schema.sql` file into your database. This will create the necessary tables (`nexusguard_bans`, `nexusguard_detections`, `nexusguard_sessions`).

@@ -1,7 +1,7 @@
 --[[
     NexusGuard Client
     Advanced anti-cheat detection system for FiveM
-    Version: 1.1.0
+    Version: 0.6.9
 ]]
 
 -- Ensure JSON library is available (e.g., from oxmysql or another resource)
@@ -55,12 +55,11 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         -- Register the local warning event name for consistency, though handled locally
         RegisterNetEvent("NexusGuard:CheatWarning")
     else
-        -- Fallback if EventRegistry hasn't loaded somehow (shouldn't happen with manifest order)
-        print("^1[NexusGuard] Warning: EventRegistry not found, using fallback event names. Ensure EventRegistry script is loaded correctly in shared_scripts.^7")
-        RegisterNetEvent('NexusGuard:ReceiveSecurityToken')
-        RegisterNetEvent('NexusGuard:CheatWarning')
-        RegisterNetEvent('nexusguard:requestScreenshot')
-        RegisterNetEvent('nexusguard:adminNotification')
+        -- EventRegistry is required. If it's not found, NexusGuard may not function correctly.
+        -- Ensure 'shared/event_registry.lua' is correctly listed in 'shared_scripts' in fxmanifest.lua
+        -- and that the EventRegistry object is properly created and exposed globally (_G.EventRegistry).
+        print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Event handling will likely fail. Ensure shared scripts are loaded.^7")
+        -- Fallback registrations removed to enforce reliance on EventRegistry for consistency.
     end
 
     --[[
@@ -117,10 +116,8 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         },
 
         -- System state
-        initialized = false,
-
-        -- Version
-        version = "1.1.0"
+        initialized = false
+        -- Note: Version is defined in fxmanifest.lua
     }
     -- Expose NexusGuard globally for detectors
     _G.NexusGuard = NexusGuard
@@ -348,9 +345,8 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
             if _G.EventRegistry then
                 _G.EventRegistry.TriggerServerEvent('DETECTION_REPORT', type, details, self.securityToken)
             else
-                -- Fallback to old names
-                TriggerServerEvent("NexusGuard:ReportCheat", type, details, self.securityToken)
-                TriggerServerEvent("nexusguard:detection", type, details, self.securityToken)
+                -- EventRegistry is required for server communication.
+                print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot report detection to server.^7")
             end
         end
     end
@@ -436,7 +432,7 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
                     if _G.EventRegistry then
                          _G.EventRegistry.TriggerServerEvent('ADMIN_SCREENSHOT_TAKEN', screenshotUrl, NexusGuard.securityToken)
                     else
-                        TriggerServerEvent('nexusguard:screenshotTaken', screenshotUrl, NexusGuard.securityToken) -- Fallback
+                         print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot report screenshot taken to server.^7")
                     end
                 else
                     -- Log the raw response if decoding fails or structure is unexpected
