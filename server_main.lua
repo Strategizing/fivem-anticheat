@@ -143,6 +143,43 @@ AddEventHandler('NexusGuard:VerifyResources', function(resources)
     print('^3[NexusGuard]^7 Received resource list from ' .. GetPlayerName(source) .. ' with ' .. #resources .. ' resources')
 end)
 
+-- Register client error event
+RegisterNetEvent('NexusGuard:ClientError')
+AddEventHandler('NexusGuard:ClientError', function(detectionName, errorMessage, securityToken)
+    local source = source
+    
+    -- Validate security token to prevent spoofed events
+    if not ValidateSecurityToken(source, securityToken) then
+        -- Just log the error, don't ban for error reports
+        print("^1[NexusGuard]^7 Invalid security token in error report from " .. GetPlayerName(source))
+        return
+    end
+    
+    print("^3[NexusGuard]^7 Client error in " .. detectionName .. " from " .. GetPlayerName(source) .. ": " .. errorMessage)
+    
+    -- Log the error
+    if Config.EnableDiscordLogs then
+        SendToDiscord('Client Error', 
+            "Player: " .. GetPlayerName(source) .. "\n" ..
+            "Detection: " .. detectionName .. "\n" ..
+            "Error: " .. errorMessage
+        )
+    end
+    
+    -- Track client errors in player metrics
+    if PlayerMetrics[source] then
+        if not PlayerMetrics[source].clientErrors then
+            PlayerMetrics[source].clientErrors = {}
+        end
+        
+        table.insert(PlayerMetrics[source].clientErrors, {
+            detection = detectionName,
+            error = errorMessage,
+            time = os.time()
+        })
+    end
+end)
+
 function ProcessDetection(playerId, detectionType, detectionData)
     -- Check for valid input
     if not playerId or not detectionType then return end
