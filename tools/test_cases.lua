@@ -1,23 +1,32 @@
 -- NexusGuard Anti-Cheat Test Cases
 -- This file defines test cases for the anti-cheat system
 
+local function detectCheat(type)
+    local detected = false
+    for _, detection in ipairs(testResults.detections or {}) do
+        if detection.type:lower() == type then
+            detected = true
+            break
+        end
+    end
+    return detected
+end
+
+local function teardownGlobal(originalKey, globalKey)
+    if _G[originalKey] then
+        _G[globalKey] = _G[originalKey]
+    end
+end
+
 local testCases = {
     {
         name = "Speed hack detection",
         run = function()
-            local detected = false
-            for _, detection in ipairs(testResults.detections or {}) do
-                if detection.type:lower() == "speedhack" then
-                    detected = true
-                    break
-                end
-            end
+            local detected = detectCheat("speedhack")
             return detected, "Speed hack was " .. (detected and "detected" or "not detected")
         end,
         teardown = function()
-            if _G._originalGetEntityVelocity then
-                _G.GetEntityVelocity = _G._originalGetEntityVelocity
-            end
+            teardownGlobal("_originalGetEntityVelocity", "GetEntityVelocity")
         end,
         expectation = true
     },
@@ -30,19 +39,11 @@ local testCases = {
         run = function()
             TriggerEvent("NexusGuard:DetectGodMode")
             Citizen.Wait(100)
-            local detected = false
-            for _, detection in ipairs(testResults.detections or {}) do
-                if detection.type:lower() == "godmode" then
-                    detected = true
-                    break
-                end
-            end
+            local detected = detectCheat("godmode")
             return detected, "God mode was " .. (detected and "detected" or "not detected")
         end,
         teardown = function()
-            if _G._originalGetPlayerInvincible then
-                _G.GetPlayerInvincible = _G._originalGetPlayerInvincible
-            end
+            teardownGlobal("_originalGetPlayerInvincible", "GetPlayerInvincible")
         end,
         expectation = true
     },
@@ -55,19 +56,11 @@ local testCases = {
         run = function()
             TriggerEvent("NexusGuard:DetectWeaponModification")
             Citizen.Wait(100)
-            local detected = false
-            for _, detection in ipairs(testResults.detections or {}) do
-                if detection.type:lower() == "weaponmod" then
-                    detected = true
-                    break
-                end
-            end
+            local detected = detectCheat("weaponmod")
             return detected, "Weapon modification was " .. (detected and "detected" or "not detected")
         end,
         teardown = function()
-            if _G._originalGetWeaponDamage then
-                _G.GetWeaponDamage = _G._originalGetWeaponDamage
-            end
+            teardownGlobal("_originalGetWeaponDamage", "GetWeaponDamage")
         end,
         expectation = true
     }

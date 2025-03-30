@@ -2,9 +2,7 @@
 -- Simulates the FiveM environment for local debugging
 -- WARNING: NEVER include this file in production server files
 
-if not IsDuplicityVersion and not GetCurrentResourceName then
-    print("🔧 Loading FiveM debug environment stub")
-
+local function initializeDebugEnvironment()
     function GetPlayerPed() return 1 end
     function PlayerId() return 0 end
     function GetEntityCoords() return {x=0, y=0, z=0} end
@@ -14,12 +12,9 @@ if not IsDuplicityVersion and not GetCurrentResourceName then
     function GetSelectedPedWeapon() return -1569615261 end
     function GetWeaponDamage() return 10.0 end
     function GetWeaponClipSize() return 30 end
+end
 
-    Citizen = {
-        CreateThread = function(cb) cb() end,
-        Wait = function(ms) end
-    }
-
+local function initializeEventHandlers()
     local eventHandlers = {}
 
     function RegisterNetEvent(eventName)
@@ -35,7 +30,12 @@ if not IsDuplicityVersion and not GetCurrentResourceName then
             eventHandlers[eventName](...)
         end
     end
+end
 
+if not IsDuplicityVersion and not GetCurrentResourceName then
+    print("🔧 Loading FiveM debug environment stub")
+    initializeDebugEnvironment()
+    initializeEventHandlers()
     print("✅ FiveM debug environment loaded")
 else
     print("⚠️ Real FiveM environment detected - debug stub disabled")

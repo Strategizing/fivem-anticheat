@@ -11,27 +11,31 @@
 ---@diagnostic disable: lowercase-global
 
 -- Player-related functions
-function GetPlayerPed(playerId) end
-function PlayerId() end
-function PlayerPedId() end
-function GetPlayerName(playerId) end
-function GetPlayers() end
-function GetPlayerEndpoint(playerId) end
-function GetPlayerIdentifierByType(playerId, type) end
-function GetPlayerServerId(playerId) end
+local function initializePlayerFunctions()
+    function GetPlayerPed(playerId) end
+    function PlayerId() end
+    function PlayerPedId() end
+    function GetPlayerName(playerId) end
+    function GetPlayers() end
+    function GetPlayerEndpoint(playerId) end
+    function GetPlayerIdentifierByType(playerId, type) end
+    function GetPlayerServerId(playerId) end
+end
 
--- Entity functions
-function GetEntityCoords(entity) end
-function GetEntityHealth(entity) end
-function GetEntityType(entity) end
-function GetEntitySpeed(entity) end
-function GetEntityModel(entity) end
-function GetEntityVelocity(entity) end
-function DoesEntityExist(entity) end
-function IsEntityDead(entity) end
-function GetEntityCollisionDisabled(entity) end
-function NetworkGetEntityOwner(entity) end
-function NetworkGetNetworkIdFromEntity(entity) end
+-- Entity-related functions
+local function initializeEntityFunctions()
+    function GetEntityCoords(entity) end
+    function GetEntityHealth(entity) end
+    function GetEntityType(entity) end
+    function GetEntitySpeed(entity) end
+    function GetEntityModel(entity) end
+    function GetEntityVelocity(entity) end
+    function DoesEntityExist(entity) end
+    function IsEntityDead(entity) end
+    function GetEntityCollisionDisabled(entity) end
+    function NetworkGetEntityOwner(entity) end
+    function NetworkGetNetworkIdFromEntity(entity) end
+end
 
 -- Ped functions
 function GetPedArmour(ped) end
@@ -120,6 +124,10 @@ Citizen = {
 -- Framework declarations
 ESX = {}
 QBCore = {}
+
+-- Initialize all functions
+initializePlayerFunctions()
+initializeEntityFunctions()
 
 ---@diagnostic enable: lowercase-global
 
