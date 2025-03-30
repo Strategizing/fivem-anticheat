@@ -121,7 +121,19 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         initialized = false
         -- Note: Version is defined in fxmanifest.lua
     }
-    -- _G.NexusGuard = NexusGuard -- REMOVED GLOBAL EXPOSURE
+
+    -- Pass NexusGuard instance to detectors
+    NexusGuard.RegisterDetectors = function()
+        local detectors = {
+            "godmode_detector",
+            "menudetection_detector",
+            -- ...other detectors...
+        }
+        for _, detector in ipairs(detectors) do
+            local detectorModule = require("client/detectors/" .. detector)
+            detectorModule.Initialize(NexusGuard)
+        end
+    end
 
     --[[
         Safe Detection Wrapper
@@ -540,4 +552,5 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         -- Allow Config and other shared scripts to load first
         Citizen.Wait(500)
         NexusGuard:Initialize()
+        NexusGuard.RegisterDetectors()
     end)

@@ -9,8 +9,6 @@ version '0.6.9' -- Reflecting framework version
 dependencies {
     'oxmysql', -- Required for database features (bans, detections, sessions) and JSON library
     'screenshot-basic' -- Required for screenshot functionality (Config.ScreenCapture.enabled)
-    -- 'chat', -- Optional: Required for default client-side warnings via exports.chat
-    -- Add framework dependencies if needed for IsPlayerAdmin checks (e.g., 'es_extended', 'qb-core')
 }
 
 shared_scripts {
@@ -29,14 +27,15 @@ client_scripts {
 }
 
 server_scripts {
-    -- '@oxmysql/lib/MySQL.lua', -- Not needed; dependency ensures MySQL is available globally or via exports['oxmysql']
     'server_main.lua'
     -- NOTE: Discord bot, API, server-side detectors, ML, webhooks, etc., are not implemented in this version.
 }
 
 files {
+    'client_main.lua',
+    'server_main.lua',
+    'config.lua',
     'sql/schema.sql' -- Database schema file
-    -- Removed: ml_models, discord_bot/config.json (missing/unused)
 }
 
 lua54 'yes'

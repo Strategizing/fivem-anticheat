@@ -21,6 +21,26 @@ local ClientsLoaded = {} -- Tracks clients that have completed the initial hash 
 local OnlineAdmins = {} -- Table to store server IDs of online admins
 _G.OnlineAdmins = OnlineAdmins -- TEMPORARY: Expose globally until PlayerMetrics/Notifications are fully refactored
 
+-- Player session manager
+local PlayerSessionManager = {}
+
+PlayerSessionManager.sessions = {}
+
+PlayerSessionManager.GetSession = function(playerId)
+    if not PlayerSessionManager.sessions[playerId] then
+        PlayerSessionManager.sessions[playerId] = {
+            metrics = {},
+            -- ...other session data...
+        }
+    end
+    return PlayerSessionManager.sessions[playerId]
+end
+
+AddEventHandler("playerDropped", function()
+    local playerId = source
+    PlayerSessionManager.sessions[playerId] = nil
+end)
+
 -- Initialize the anti-cheat on resource start
 AddEventHandler('onResourceStart', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
@@ -59,7 +79,7 @@ AddEventHandler('onResourceStart', function(resourceName)
     -- Initialize AI (if function exists and enabled) using API
     -- AI Placeholder Removed
     -- if NexusGuardServer.Config.AI and NexusGuardServer.Config.AI.enabled then
-TH    --     if NexusGuardServer.AI and NexusGuardServer.AI.UpdateModels then -- Assuming UpdateModels is the init/update func now
+    --     if NexusGuardServer.AI and NexusGuardServer.AI.UpdateModels then -- Assuming UpdateModels is the init/update func now
     --         NexusGuardServer.AI.UpdateModels()
     --     else
     --         Log("^1[NexusGuard] AI is enabled in config, but AI module or UpdateModels function not found in API! AI features inactive.^7", 1)
@@ -115,8 +135,9 @@ function OnPlayerConnecting(playerName, setKickReason, deferrals)
     -- Check admin status using API
     local isAdmin = (NexusGuardServer.Permissions and NexusGuardServer.Permissions.IsAdmin and NexusGuardServer.Permissions.IsAdmin(source)) or false
 
-    -- Initialize player metrics (Still using _G.PlayerMetrics for now)
-    NexusGuardServer.PlayerMetrics[source] = {
+    -- Initialize player metrics using PlayerSessionManager
+    local session = PlayerSessionManager.GetSession(source)
+    session.metrics = {
         connectTime = os.time(), playerName = playerName, license = license, ip = ip, discord = discord,
         lastPosition = nil, warningCount = 0, detections = {}, healthHistory = {}, movementSamples = {},
         weaponStats = {}, behaviorProfile = {}, trustScore = 100.0, securityToken = nil,
@@ -140,10 +161,10 @@ function OnPlayerDropped(reason)
     if not source or source <= 0 then return end
 
     local playerName = GetPlayerName(source) or "Unknown"
-    local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[source]
+    local session = PlayerSessionManager.GetSession(source)
 
     -- Save detection data to database if enabled and metrics exist, using API
-    if NexusGuardServer.Config.Database and NexusGuardServer.Config.Database.enabled and metrics then
+    if NexusGuardServer.Config.Database and NexusGuardServer.Config.Database.enabled and session.metrics then
         if NexusGuardServer.Database and NexusGuardServer.Database.SavePlayerMetrics then
             NexusGuardServer.Database.SavePlayerMetrics(source)
         else
@@ -152,14 +173,14 @@ function OnPlayerDropped(reason)
     end
 
     -- Clean up player data
-    if metrics and metrics.isAdmin then
+    if session.metrics.isAdmin then
         OnlineAdmins[source] = nil -- Use local table
         Log("^2[NexusGuard]^7 Admin disconnected: " .. playerName .. " (ID: " .. source .. ") Reason: " .. reason .. "^7", 2)
     else
         Log("^2[NexusGuard]^7 Player disconnected: " .. playerName .. " (ID: " .. source .. ") Reason: " .. reason .. "^7", 2)
     end
 
-    if NexusGuardServer.PlayerMetrics then NexusGuardServer.PlayerMetrics[source] = nil end
+    PlayerSessionManager.sessions[source] = nil
     ClientsLoaded[source] = nil
 end
 
@@ -248,8 +269,11 @@ function RegisterNexusGuardServerEvents()
         if not NexusGuardServer.Security or not NexusGuardServer.Security.ValidateToken or not NexusGuardServer.Security.ValidateToken(source, tokenData) then Log("^1[NexusGuard]^7 Invalid security token in error report from " .. playerName .. ". Ignoring report.^7", 1); return end
         Log("^3[NexusGuard]^7 Client error reported by " .. playerName .. " in module '" .. detectionName .. "': " .. errorMessage .. "^7", 2)
         if NexusGuardServer.Discord and NexusGuardServer.Discord.Send then NexusGuardServer.Discord.Send("general", 'Client Error Report', "Player: " .. playerName .. " (ID: " .. source .. ")\nModule: " .. detectionName .. "\nError: " .. errorMessage, NexusGuardServer.Config.Discord.webhooks and NexusGuardServer.Config.Discord.webhooks.general) end
-        local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[source]
-        if metrics then if not metrics.clientErrors then metrics.clientErrors = {} end; table.insert(metrics.clientErrors, { detection = detectionName, error = errorMessage, time = os.time() }) end
+        local session = PlayerSessionManager.GetSession(source)
+        if session.metrics then
+            if not session.metrics.clientErrors then session.metrics.clientErrors = {} end
+            table.insert(session.metrics.clientErrors, { detection = detectionName, error = errorMessage, time = os.time() })
+        end
     end)
 
      -- Screenshot Taken Handler
@@ -271,13 +295,14 @@ function RegisterNexusGuardServerEvents()
         local source = source; if not source or source <= 0 then return end
         local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
         if not NexusGuardServer.Security or not NexusGuardServer.Security.ValidateToken or not NexusGuardServer.Security.ValidateToken(source, tokenData) then Log("^1[NexusGuard] Invalid security token with position update from " .. playerName .. ". Banning.^7", 1); if NexusGuardServer.Bans.Execute then NexusGuardServer.Bans.Execute(source, 'Invalid security token with position update') else DropPlayer(source, "Anti-Cheat validation failed (Position Update Token).") end; return end
-        local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[source]; if not metrics then Log("^1[NexusGuard] PlayerMetrics not found for " .. playerName .. " during position update.^7", 1); return end
+        local session = PlayerSessionManager.GetSession(source)
+        if not session.metrics then Log("^1[NexusGuard] PlayerMetrics not found for " .. playerName .. " during position update.^7", 1); return end
         if type(currentPos) ~= "vector3" then Log("^1[NexusGuard] Invalid position data received from " .. playerName .. ". Kicking.^7", 1); DropPlayer(source, "Anti-Cheat validation failed (Invalid Position Data)."); return end
 
         local serverSpeedThreshold = (NexusGuardServer.Config.Thresholds and NexusGuardServer.Config.Thresholds.serverSideSpeedThreshold) or 50.0 -- Use new config value
         local minTimeDiff = 500
-        if metrics.lastServerPosition and metrics.lastServerPositionTimestamp then
-            local lastPos, lastTimestamp = metrics.lastServerPosition, metrics.lastServerPositionTimestamp
+        if session.metrics.lastServerPosition and session.metrics.lastServerPositionTimestamp then
+            local lastPos, lastTimestamp = session.metrics.lastServerPosition, session.metrics.lastServerPositionTimestamp
             local currentServerTimestamp = GetGameTimer()
             local timeDiffMs = currentServerTimestamp - lastTimestamp
             if timeDiffMs >= minTimeDiff then
@@ -289,7 +314,7 @@ function RegisterNexusGuardServerEvents()
                 end
             end
         end
-        metrics.lastServerPosition = currentPos; metrics.lastServerPositionTimestamp = GetGameTimer()
+        session.metrics.lastServerPosition = currentPos; session.metrics.lastServerPositionTimestamp = GetGameTimer()
     end)
 
     -- Health Update Handler
@@ -297,14 +322,15 @@ function RegisterNexusGuardServerEvents()
         local source = source; if not source or source <= 0 then return end
         local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
         if not NexusGuardServer.Security or not NexusGuardServer.Security.ValidateToken or not NexusGuardServer.Security.ValidateToken(source, tokenData) then Log("^1[NexusGuard] Invalid security token with health update from " .. playerName .. ". Banning.^7", 1); if NexusGuardServer.Bans.Execute then NexusGuardServer.Bans.Execute(source, 'Invalid security token with health update') else DropPlayer(source, "Anti-Cheat validation failed (Health Update Token).") end; return end
-        local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[source]; if not metrics then Log("^1[NexusGuard] PlayerMetrics not found for " .. playerName .. " during health update.^7", 1); return end
+        local session = PlayerSessionManager.GetSession(source)
+        if not session.metrics then Log("^1[NexusGuard] PlayerMetrics not found for " .. playerName .. " during health update.^7", 1); return end
 
         -- Use the specific server-side thresholds from config
         local serverHealthRegenThreshold = (NexusGuardServer.Config.Thresholds and NexusGuardServer.Config.Thresholds.serverSideRegenThreshold) or 3.0 -- Use serverSideRegenThreshold
         local serverArmorMax = (NexusGuardServer.Config.Thresholds and NexusGuardServer.Config.Thresholds.serverSideArmorThreshold) or 105.0 -- Use serverSideArmorThreshold
 
-        if metrics.lastServerHealth and metrics.lastServerHealthTimestamp then
-            local lastHealth, lastTimestamp = metrics.lastServerHealth, metrics.lastServerHealthTimestamp
+        if session.metrics.lastServerHealth and session.metrics.lastServerHealthTimestamp then
+            local lastHealth, lastTimestamp = session.metrics.lastServerHealth, session.metrics.lastServerHealthTimestamp
             local currentServerTimestamp = GetGameTimer()
             local timeDiffMs = currentServerTimestamp - lastTimestamp
             if currentHealth > lastHealth and timeDiffMs > 100 then
@@ -320,7 +346,7 @@ function RegisterNexusGuardServerEvents()
              Log("^1[NexusGuard Server Check]^7 Suspiciously high armor detected for " .. playerName .. " (ID: " .. source .. "): " .. currentArmor .. " (Max Allowed: " .. serverArmorMax .. ").^7", 1)
              if NexusGuardServer.Detections.Process then NexusGuardServer.Detections.Process(source, "ServerArmorCheck", { armor = currentArmor, threshold = serverArmorMax }) end
         end
-        metrics.lastServerHealth = currentHealth; metrics.lastServerArmor = currentArmor; metrics.lastServerHealthTimestamp = GetGameTimer()
+        session.metrics.lastServerHealth = currentHealth; session.metrics.lastServerArmor = currentArmor; session.metrics.lastServerHealthTimestamp = GetGameTimer()
     end)
 
     Log("^2[NexusGuard] Standardized server event handlers registration complete.^7", 2)

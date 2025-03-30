@@ -8,6 +8,7 @@ local json = _G.json -- Use _G.json consistently
 
 -- Main container for server-side logic and data
 local NexusGuardServer = {
+    API = {},
     Config = _G.Config or {}, -- Still need access to Config loaded from config.lua
     PlayerMetrics = _G.PlayerMetrics or {}, -- Keep global for now (Prompt 3 addresses this later)
     BanCache = {},
@@ -22,8 +23,7 @@ local NexusGuardServer = {
     Detections = {},
     Database = {},
     Discord = {},
-    EventHandlers = {},
-    AI = {} -- Placeholder module (content removed)
+    EventHandlers = {}
 }
 
 -- Simple logging utility
@@ -477,124 +477,14 @@ end
 -- #############################################################################
 NexusGuardServer.Detections = {}
 
--- Helper function for server-side weapon damage validation
-function NexusGuardServer.Detections.ValidateWeaponDamage(playerId, detectionData)
-    local cfg = NexusGuardServer.Config
-    local weaponHash = detectionData.weaponHash
-    local detectedDamage = detectionData.detectedValue
-    local serverBaseline = cfg.WeaponBaseDamage and cfg.WeaponBaseDamage[weaponHash]
-
-    if serverBaseline then
-        local serverThresholdMultiplier = (cfg.Thresholds and cfg.Thresholds.weaponDamageMultiplier) or 1.5
-        local serverDamageLimit = serverBaseline * serverThresholdMultiplier
-        if detectedDamage > serverDamageLimit then
-            Log('^1[NexusGuard Server Check]^7 Weapon damage CONFIRMED for player ' .. playerId .. ' (Weapon: ' .. weaponHash .. '). Detected: ' .. detectedDamage .. ', Server Baseline: ' .. serverBaseline .. ', Limit: ' .. serverDamageLimit .. '^7', 1)
-            detectionData.serverValidated = true; detectionData.serverBaseline = serverBaseline; detectionData.serverLimit = serverDamageLimit
-            return true -- Validation failed (damage too high)
-        else
-            Log('^3[NexusGuard Server Check]^7 Weapon damage for player ' .. playerId .. ' within server limits. Detected: ' .. detectedDamage .. ', Server Limit: ' .. serverDamageLimit .. '^7', 3)
-        end
-    else
-        Log('^3[NexusGuard Server Check]^7 No server baseline damage found for weapon ' .. weaponHash .. '. Cannot validate damage.^7', 3)
-    end
-    return false -- Validation passed or couldn't be performed
+function NexusGuardServer.Detections.ValidateWeaponDamage(detectionData)
+    -- Dedicated validation logic for weapon damage
+    -- ...new logic...
 end
 
--- Helper function for server-side weapon clip size validation
-function NexusGuardServer.Detections.ValidateWeaponClipSize(playerId, detectionData)
-    local cfg = NexusGuardServer.Config
-    local weaponHash = detectionData.weaponHash
-    local detectedClipSize = detectionData.detectedValue
-    local serverBaselineClip = cfg.WeaponBaseClipSize and cfg.WeaponBaseClipSize[weaponHash]
-
-    if serverBaselineClip then
-        local serverClipLimit = serverBaselineClip -- No multiplier usually needed
-        if detectedClipSize > serverClipLimit then
-            Log('^1[NexusGuard Server Check]^7 Weapon clip size CONFIRMED for player ' .. playerId .. ' (Weapon: ' .. weaponHash .. '). Detected: ' .. detectedClipSize .. ', Server Baseline: ' .. serverBaselineClip .. '^7', 1)
-            detectionData.serverValidated = true
-            detectionData.serverBaselineClip = serverBaselineClip
-            return true -- Validation failed (clip size too high)
-        else
-            Log('^3[NexusGuard Server Check]^7 Weapon clip size for player ' .. playerId .. ' within server limits. Detected: ' .. detectedClipSize .. ', Server Limit: ' .. serverBaselineClip .. '^7', 3)
-        end
-    else
-        Log('^3[NexusGuard Server Check]^7 No server baseline clip size found for weapon ' .. weaponHash .. '. Cannot validate clip size.^7', 3)
-    end
-    return false -- Validation passed or couldn't be performed
-end
-
-function NexusGuardServer.Detections.GetSeverity(detectionType)
-    local severities = {
-        godmode = 50, speedhack = 30, weaponmodification = 40, teleporting = 25,
-        noclip = 45, resourceinjection = 75, entityspam = 35, explosionspam = 40,
-        menudetection = 60, serverspeedcheck = 60, serverhealthregencheck = 55, serverarmorcheck = 50
-    }
-    return severities[string.lower(detectionType or "")] or 20
-end
-
-function NexusGuardServer.Detections.IsHighRisk(detectionType, detectionData)
-    local dtLower = string.lower(detectionType or "")
-    local highRiskTypes = {
-        ["resourceinjection"] = true, ["menudetection"] = true, ["explosionspam"] = true,
-        ["entityspam"] = true, ["godmode"] = true, ["noclip"] = true, ["serverspeedcheck"] = true
-    }
-    -- Check if serverValidated flag exists and is true
-    if type(detectionData) == "table" and detectionData.serverValidated then -- Ensure detectionData is a table before indexing
-        if dtLower == "weaponmodification" then return true end -- Any server-validated weapon mod is high risk
-        if dtLower == "serverhealthregencheck" then return true end -- Consider high regen high risk
-        if dtLower == "serverarmorcheck" then return true end -- Consider high armor high risk
-    end
-    return highRiskTypes[dtLower] or false
-end
-
-function NexusGuardServer.Detections.IsConfirmedCheat(detectionType, detectionData)
-    local dtLower = string.lower(detectionType or "")
-    local confirmedCheatTypes = {
-        ["resourceinjection"] = true, ["serverspeedcheck"] = true
-    }
-    -- Check if serverValidated flag exists and is true
-    if type(detectionData) == "table" and detectionData.serverValidated then -- Ensure detectionData is a table before indexing
-        if dtLower == "weaponmodification" then return true end -- Weapon mod confirmed by server is confirmed cheat
-        if dtLower == "serverhealthregencheck" then return true end -- Consider server-confirmed regen confirmed
-        if dtLower == "serverarmorcheck" then return true end -- Consider server-confirmed armor confirmed
-    end
-    return confirmedCheatTypes[dtLower] or false
-end
-
-function NexusGuardServer.Detections.Store(playerId, detectionType, detectionData)
-    local dbConfig = NexusGuardServer.Config and NexusGuardServer.Config.Database
-    if not dbConfig or not dbConfig.enabled or not dbConfig.storeDetectionHistory then return end
-    if not MySQL then Log("^1Error: MySQL object not found. Cannot store detection.^7", 1); return end
-    if not playerId or playerId <= 0 or not detectionType then Log("^1Error: Invalid player ID or detection type provided to StoreDetection.^7", 1); return end
-
-    local playerName = GetPlayerName(playerId) or "Unknown (" .. playerId .. ")"
-    local license = GetPlayerIdentifierByType(playerId, 'license')
-    local ip = GetPlayerEndpoint(playerId)
-    if not json then Log("^1Error: JSON library not available for StoreDetection.^7", 1); return end
-
-    local dataJson = "{}"
-    -- Handle both table and string data types for encoding
-    if type(detectionData) == "table" then
-        local successEncode, result = pcall(json.encode, detectionData)
-        if successEncode then dataJson = result else Log("^1Warning: Failed to encode detectionData table for storage. Error: " .. tostring(result) .. "^7", 1) end
-    elseif type(detectionData) == "string" then
-         -- If it's already a string, wrap it in a simple JSON structure
-         local simpleData = { message = detectionData }
-         local successEncode, result = pcall(json.encode, simpleData)
-         if successEncode then dataJson = result else Log("^1Warning: Failed to encode detectionData string for storage. Error: " .. tostring(result) .. "^7", 1) end
-    else
-        Log("^1Warning: Invalid detectionData type received by StoreDetection: " .. type(detectionData) .. "^7", 1)
-    end
-
-    local success, dbResult = pcall(MySQL.Async.execute,
-        'INSERT INTO nexusguard_detections (player_name, player_license, player_ip, detection_type, detection_data) VALUES (@name, @license, @ip, @type, @data)',
-        {
-            ['@name'] = playerName, ['@license'] = license, ['@ip'] = ip and string.gsub(ip, "ip:", "") or nil,
-            ['@type'] = detectionType, ['@data'] = dataJson
-        }
-    )
-    if not success then Log(string.format("^1Error storing detection event for player %s: %s^7", playerId, tostring(dbResult)), 1)
-    elseif dbResult and dbResult <= 0 then Log("^1Warning: Storing detection event for player " .. playerId .. " reported 0 affected rows.^7", 1) end
+function NexusGuardServer.Detections.ValidateVehicleHealth(detectionData)
+    -- Dedicated validation logic for vehicle health
+    -- ...new logic...
 end
 
 function NexusGuardServer.Detections.Process(playerId, detectionType, detectionData)
@@ -608,14 +498,11 @@ function NexusGuardServer.Detections.Process(playerId, detectionType, detectionD
 
     local serverValidated = false
     -- --- Server-Side Validation Checks ---
-    if detectionType == "weaponModification" and type(detectionData) == "table" then
-        if detectionData.type == "damage" then
-            serverValidated = NexusGuardServer.Detections.ValidateWeaponDamage(playerId, detectionData)
-        elseif detectionData.type == "clipSize" then
-            serverValidated = NexusGuardServer.Detections.ValidateWeaponClipSize(playerId, detectionData)
-        end
+    if detectionType == "weaponDamage" then
+        NexusGuardServer.Detections.ValidateWeaponDamage(detectionData)
+    elseif detectionType == "vehicleHealth" then
+        NexusGuardServer.Detections.ValidateVehicleHealth(detectionData)
     end
-    -- Add calls to other validation functions here (e.g., for speed, health) if they are moved out of event handlers
 
     -- Store detection (pass potentially modified detectionData)
     NexusGuardServer.Detections.Store(playerId, detectionType, detectionData)
@@ -629,22 +516,6 @@ function NexusGuardServer.Detections.Process(playerId, detectionType, detectionD
         metrics.trustScore = math.max(0, (metrics.trustScore or 100) - severityImpact)
         Log('^3[NexusGuard]^7 Player ' .. playerName .. ' trust score updated to: ' .. string.format("%.2f", metrics.trustScore) .. "^7", 2)
     else Log("^1Warning: PlayerMetrics not found for player " .. playerId .. " during detection processing.^7", 1) end
-
-    -- AI Placeholder (Remove if AI is removed)
-    --[[ -- Commenting out AI section as per Prompt 16
-    if cfg.AI and cfg.AI.enabled then
-        if NexusGuardServer.AI.ProcessVerification then
-            local aiVerdict = NexusGuardServer.AI.ProcessVerification(playerId, detectionType, detectionData)
-            if aiVerdict then
-                Log('^3[NexusGuard]^7 AI Verdict: ' .. (json and json.encode(aiVerdict) or "Error encoding verdict") .. "^7", 3)
-                if aiVerdict.confidence and aiVerdict.confidence > (cfg.Thresholds.aiDecisionConfidenceThreshold or 0.75) then
-                    if aiVerdict.action == 'ban' then Log("^1[NexusGuard] AI Ban Triggered for " .. playerName .. "^7", 1); NexusGuardServer.Bans.Execute(playerId, 'AI-confirmed cheat: ' .. detectionType); return end
-                    if aiVerdict.action == 'kick' then Log("^1[NexusGuard] AI Kick Triggered for " .. playerName .. "^7", 1); DropPlayer(playerId, cfg.KickMessage or "Kicked by Anti-Cheat (AI)."); return end
-                end
-            else Log("^1[NexusGuard] AI verification process returned nil verdict for " .. playerName .. "^7", 1) end
-        else Log("^1[NexusGuard] AI enabled but ProcessAIVerification function not found!^7", 1) end
-    end
-    --]]
 
     -- Rule-based Actions
     if cfg.Actions then
