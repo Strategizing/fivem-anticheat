@@ -25,7 +25,7 @@ Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups considered admin b
 -- !! CRITICAL !! Change this to a long, unique, random string for your server.
 -- This is used by the default secure token implementation (HMAC-SHA256 via ox_lib).
 -- **LEAVING THIS AS DEFAULT OR USING A WEAK SECRET WILL MAKE YOUR SERVER VULNERABLE.**
-Config.SecuritySecret = "oP|ie.RXp>f'o~i&G|iAN3(4#cmTC17!#l}wcJtx;;3dGaM:8<i%hnl|16U=yI5" -- <<< UPDATED with user-provided secret
+Config.SecuritySecret = "295BF1A78C50625D7636A7BBD65235814E028EC9C5B68E7DAD6B73702BFF08A4"
 
 -- Auto Configuration (Placeholder Features)
 Config.AutoConfig = {
