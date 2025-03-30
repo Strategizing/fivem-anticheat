@@ -12,14 +12,14 @@ dependency {
 
 shared_scripts {
     'config.lua',
-    'globals.lua',  -- Added this line - load globals before other scripts
+    'globals.lua',
     'shared/utils.lua',
     'shared/constants.lua',
     'shared/discord_config.lua'
 }
 
 client_scripts {
-    'client/main.lua',
+    'client_main.lua',
     'client/detectors/*.lua',
     'client/networks/*.lua',
     'client/ml/*.lua',
@@ -29,7 +29,7 @@ client_scripts {
 
 server_scripts {
     '@oxmysql/lib/MySQL.lua',
-    'server/main.lua',
+    'server_main.lua',
     'server/api/*.lua',
     'server/detectors/*.lua',
     'server/ml/*.lua',
@@ -60,3 +60,6 @@ provides {
     'discord_anticheat',
     'discord_richpresence'
 }
+
+-- Exclude development/debug tools from server resources
+server_ignore_resource_method 'tools'

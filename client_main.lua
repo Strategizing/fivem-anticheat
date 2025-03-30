@@ -3,39 +3,26 @@
 -- Provides protection against common cheating methods including god mode, 
 -- weapon modification, speed hacks, teleporting, noclip, and mod menus
 
--- Environment compatibility layer for testing outside FiveM
-if not RegisterNetEvent then
-    function RegisterNetEvent(eventName) end
-end
+-- Environment compatibility layer - now uses a safer approach that won't interfere with FiveM
+local isDebugEnvironment = not Citizen or not Citizen.CreateThread
 
-if not Citizen then
-    Citizen = {
+-- Only create compatibility stubs if we're not in FiveM
+if isDebugEnvironment then
+    print("Debug environment detected, loading compatibility layer")
+    
+    RegisterNetEvent = RegisterNetEvent or function(eventName) end
+    
+    Citizen = Citizen or {
         CreateThread = function(callback) callback() end,
         Wait = function(ms) end
     }
-end
-
-if not vector3 then
-    vector3 = function(x, y, z)
+    
+    vector3 = vector3 or function(x, y, z)
         return {x = x or 0, y = y or 0, z = z or 0}
     end
-end
-
-if not GetGameTimer then
-    GetGameTimer = function()
-        if type(GetTickCount64) == "function" then
-            return GetTickCount64()
-        elseif type(_G["GetTickCount"]) == "function" then
-            return _G["GetTickCount"]()
-        else
-            return os.clock() * 1000 -- Fallback to Lua's os.clock (seconds) converted to ms
-        end
-    end
-end
-
-if not GetEntityHealth then
-    GetEntityHealth = function(entity)
-        return 100 -- Default health value for testing environment
+    
+    GetGameTimer = GetGameTimer or function()
+        return os.clock() * 1000
     end
 end
 
@@ -323,7 +310,8 @@ function ReportCheat(type, details)
         
         TriggerEvent("NexusGuard:CheatWarning", type, details)
     else
-        -- Use the same event name the server is listening for
+        -- Use both event names to ensure compatibility
+        TriggerServerEvent("NexusGuard:ReportCheat", type, details, NexusGuard.securityToken)
         TriggerServerEvent("nexusguard:detection", type, details, NexusGuard.securityToken)
     end
 end

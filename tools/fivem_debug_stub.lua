@@ -1,5 +1,9 @@
 -- FiveM Debug Environment Stub
 -- This file simulates the FiveM environment for local debugging
+-- WARNING: This file should NEVER be included in production server files
+
+-- Only load debug environment if we're not in a real FiveM environment
+if not IsDuplicityVersion and not GetCurrentResourceName then
 
 -- Global FiveM natives that may be used in your code
 function GetPlayerPed() return 1 end
@@ -67,6 +71,48 @@ function vector3(x, y, z)
     return {x = x or 0, y = y or 0, z = z or 0}
 end
 
+-- Debugging utilities
+_G.DEBUG = {
+    enabled = true,
+    
+    -- Print a table's contents recursively
+    printTable = function(tbl, indent)
+        indent = indent or 0
+        for k, v in pairs(tbl) do
+            local formatting = string.rep("  ", indent) .. k .. ": "
+            if type(v) == "table" then
+                print(formatting)
+                DEBUG.printTable(v, indent + 1)
+            else
+                print(formatting .. tostring(v))
+            end
+        end
+    end,
+    
+    -- Simulate a cheat detection
+    simulateDetection = function(type, data)
+        print("⚠️ Simulating cheat detection: " .. type)
+        if eventHandlers["NexusGuard:CheatDetected"] then
+            eventHandlers["NexusGuard:CheatDetected"](type, data or {})
+        else
+            print("❌ No handler registered for NexusGuard:CheatDetected")
+        end
+    end
+}
+
+-- Add this function to your debug stub
+function DebugStep(name, func)
+    print("🔍 DEBUG STEP: " .. name)
+    local status, result = pcall(func)
+    if status then
+        print("✅ Step completed successfully")
+        return result
+    else
+        print("❌ Step failed: " .. tostring(result))
+        return nil
+    end
+end
+
 -- Helper to load your script with FiveM environment
 -- Changed from global to local function
 local function LoadWithFiveM(scriptPath)
@@ -85,3 +131,8 @@ _G.LoadWithFiveM = LoadWithFiveM
 
 print("FiveM debug environment loaded")
 print("Use LoadWithFiveM('path/to/your/script.lua') to load a script")
+print("WARNING: This is a debug environment and should not be used in production")
+
+else
+    print("Real FiveM environment detected - debug stub disabled")
+end
