@@ -1,0 +1,34 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE/Editor Files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Build Artifacts (if any)
+/dist/
+/build/
+
+# Dependency Directories (if managed locally, though typically avoided)
+# node_modules/
+# vendor/
+
+# Local Configuration Overrides (example)
+config.local.lua
+secrets.lua
+
+# Log files
+*.log
+
+# Data files (like banlist, if desired - uncomment to ignore)
+# data/
+# data/*.json
+
+# Other common ignores
+.cache/
+*.bak
+*.tmp

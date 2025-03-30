@@ -13,7 +13,7 @@ dependency {
 shared_scripts {
     'config.lua',
     'globals.lua',
-    'shared/utils.lua',
+    -- 'shared/utils.lua', -- Removed, file does not exist
     'shared/constants.lua',
     'shared/discord_config.lua',
     'shared/detector_registry.lua',

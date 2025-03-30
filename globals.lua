@@ -1,437 +1,516 @@
 --[[
-    FiveM Anti-Cheat System
-    Global definitions and configurations
+    NexusGuard Globals & Server-Side Helpers
+    Contains shared functions and placeholder implementations.
+    NOTE: Many functions here are placeholders requiring user implementation.
 ]]
 
--- Configuration settings
-AC = {}
-AC.config = {
-    enabled = true,
-    debugMode = false,
-    banEnabled = true,
-    kickEnabled = true,
-    maxWarnings = 3,
-    detectionThreshold = 0.85,
-    screenCaptureEnabled = true,
-    logLevel = 2, -- 0: None, 1: Critical, 2: Normal, 3: Debug
-}
+-- Ensure JSON library is available (e.g., from oxmysql or another resource)
+-- If using oxmysql, it usually provides json globally. Otherwise, add a dependency.
+local json = json or _G.json
 
--- Add this after the AC initialization section
-AC.Commands = {}
-
--- Add this function
-AC.Commands.RegisterCommand = function(name, options, callback)
-    if not AC.commands then AC.commands = {} end
-    AC.commands[name] = {
-        name = name,
-        description = options.description or "",
-        usage = options.usage or "",
-        permission = options.permission or "user",
-        handler = callback
-    }
-    AC.utils.log("Registered command: " .. name, 3)
-    return AC.commands[name]
-end
-
--- Detection types
-AC.detectionTypes = {
-    SPEEDHACK = 1,
-    TELEPORT = 2,
-    WEAPON_HACK = 3,
-    GOD_MODE = 4,
-    RESOURCE_INJECTION = 5,
-    ENTITY_SPAWNING = 6,
-    MENU_DETECTION = 7,
-    BLACKLISTED_EVENT = 8,
-    BLACKLISTED_COMMAND = 9,
-    UNAUTHORIZED_RESOURCE = 10
-}
-
--- Action types
-AC.actionTypes = {
-    WARN = 1,
-    KICK = 2,
-    BAN = 3,
-    LOG = 4
-}
-
--- Utility functions
-AC.utils = {}
-
--- Format and log messages
-AC.utils.log = function(message, level)
+-- Simple logging utility
+local function Log(message, level)
     level = level or 2
-    if AC.config.logLevel >= level then
-        print("[FiveM-AntiCheat] " .. message)
+    -- Assuming Config.logLevel exists, otherwise default to showing level 2+
+    local logLevel = (Config and Config.logLevel) or 2
+    if logLevel >= level then
+        print("[NexusGuard] " .. message)
     end
 end
 
--- Tracking data
-AC.players = {}
-AC.suspiciousPlayers = {}
-AC.banList = {}
-
--- Events
-AC.events = {
-    detection = "anticheat:detection",
-    action = "anticheat:action",
-    screenCapture = "anticheat:screencapture",
-    adminNotify = "anticheat:adminNotify"
-}
-
--- NexusGuard global functions
-if not _G.NexusGuard then
-    _G.NexusGuard = {}
-end
+-- Global variable to hold the ban list (loaded from file)
+local BanList = {}
 
 -- Ban list related functions
-AC.LoadBanList = function()
-    local banListJson = LoadResourceFile(GetCurrentResourceName(), "data/banlist.json")
-    if banListJson then
-        AC.banList = json.decode(banListJson) or {}
-        AC.utils.log("Loaded " .. #AC.banList .. " bans from database", 2)
+function LoadBanList()
+    local success, banListJson = pcall(LoadResourceFile, GetCurrentResourceName(), "data/banlist.json")
+    if success and banListJson then
+        -- Ensure json library is available before decoding
+        if not json then
+            Log("^1Error: JSON library not available for LoadBanList.^7", 1)
+            BanList = {}
+            return
+        end
+        local decodeSuccess, decodedList = pcall(json.decode, banListJson)
+        if decodeSuccess then
+            BanList = decodedList or {}
+            Log("Loaded " .. #BanList .. " bans from data/banlist.json", 2)
+        else
+            Log("^1Error decoding banlist.json: " .. tostring(decodedList) .. "^7", 1)
+            BanList = {}
+        end
     else
-        AC.banList = {}
-        AC.utils.log("No existing ban list found, creating new one", 2)
-        AC.SaveBanList()
+        BanList = {}
+        Log("No existing ban list found (data/banlist.json), creating new one.", 2)
+        -- Ensure SaveBanList exists before calling recursively, or handle differently
+        if _G.SaveBanList then
+             SaveBanList() -- Attempt to save an empty one
+        else
+             Log("^1Warning: SaveBanList not defined when trying to create initial ban list.^7", 1)
+        end
     end
 end
 
-AC.SaveBanList = function()
-    local banListJson = json.encode(AC.banList)
-    SaveResourceFile(GetCurrentResourceName(), "data/banlist.json", banListJson, -1)
-    AC.utils.log("Ban list saved with " .. #AC.banList .. " entries", 3)
+function SaveBanList()
+    -- Ensure json library is available before encoding
+    if not json then
+        Log("^1Error: JSON library not available for SaveBanList.^7", 1)
+        return
+    end
+    local encodeSuccess, banListJson = pcall(json.encode, BanList)
+    if encodeSuccess then
+        local saveSuccess, err = pcall(SaveResourceFile, GetCurrentResourceName(), "data/banlist.json", banListJson, -1)
+        if saveSuccess then
+            Log("Ban list saved with " .. #BanList .. " entries", 3)
+        else
+            Log("^1Error saving banlist.json: " .. tostring(err) .. "^7", 1)
+        end
+    else
+        Log("^1Error encoding ban list: " .. tostring(banListJson) .. "^7", 1)
+    end
 end
 
 function IsPlayerBanned(license, ip)
-    if not AC.banList then return false end
-    
-    for _, ban in ipairs(AC.banList) do
-        for _, identifier in ipairs(ban.identifiers or {}) do
-            if identifier == license or identifier == "ip:" .. ip then
-                return true
+    if not BanList then return false end
+
+    for _, ban in ipairs(BanList) do
+        -- Ensure ban.identifiers is a table before iterating
+        if type(ban.identifiers) == "table" then
+            for _, identifier in ipairs(ban.identifiers) do
+                -- Ensure identifier is a string before comparing
+                if type(identifier) == "string" and (identifier == license or identifier == "ip:" .. ip) then
+                    return true, ban.reason or "No reason specified"
+                end
             end
         end
     end
-    return false
+    return false, nil
 end
 
+-- Placeholder: Needs actual database implementation if enabled
+-- @param banData Table containing ban details (name, reason, identifiers, etc.)
 function StorePlayerBan(banData)
-    if Config.Database.enabled then
-        -- Database implementation would go here
-        AC.utils.log("Stored player ban in database: " .. banData.name, 2)
+    if Config and Config.Database and Config.Database.enabled then
+        Log("Placeholder: Storing player ban in database: " .. (banData and banData.name or "Unknown"), 2)
+        --[[
+            IMPLEMENTATION REQUIRED:
+            Use oxmysql or your preferred DB library to insert ban details.
+            Example using oxmysql (ensure MySQL object is available):
+            local identifiersJson = json.encode(banData.identifiers or {})
+            MySQL.Async.execute(
+                'INSERT INTO nexusguard_bans (name, reason, identifiers, admin, date) VALUES (@name, @reason, @identifiers, @admin, NOW())',
+                {
+                    ['@name'] = banData.name,
+                    ['@reason'] = banData.reason,
+                    ['@identifiers'] = identifiersJson,
+                    ['@admin'] = banData.admin
+                },
+                function(affectedRows)
+                    if affectedRows > 0 then
+                        Log("Ban for " .. banData.name .. " stored in database.", 3)
+                    else
+                        Log("^1Error storing ban for " .. banData.name .. " in database.^7", 1)
+                    end
+                end
+            )
+        ]]
+        -- Example: MySQL.Async.execute('INSERT INTO nexusguard_bans ...', {banData.name, banData.reason, ...})
     end
 end
 
 -- Player related functions
+-- Placeholder: Needs implementation based on your server's permission system.
+-- @param playerId The server ID of the player to check.
+-- @return boolean True if the player is considered an admin, false otherwise.
 function IsPlayerAdmin(playerId)
+    -- Ensure Config and AdminGroups are loaded
+    if not Config or not Config.AdminGroups then
+        Log("^1Warning: Config.AdminGroups not found for IsPlayerAdmin check.^7", 1)
+        -- Default to false if config is missing
+        return false
+    end
+    -- Ensure playerId is valid
+    if not playerId or tonumber(playerId) == nil then return false end
+
     for _, group in ipairs(Config.AdminGroups) do
-        if IsPlayerAceAllowed(playerId, "group." .. group) then
-            return true
-        end
+    -- Check if IsPlayerAceAllowed exists before calling (for built-in ACE perms)
+    if _G.IsPlayerAceAllowed and IsPlayerAceAllowed(playerId, "group." .. group) then
+        return true
+        --[[
+            ALTERNATIVE IMPLEMENTATION (Example for ESX/QBCore):
+            Replace the IsPlayerAceAllowed check with framework-specific checks.
+            Example ESX:
+            local xPlayer = ESX.GetPlayerFromId(playerId)
+            if xPlayer and xPlayer.getGroup() == group then return true end
+
+            Example QBCore:
+            local QBCore = exports['qb-core']:GetCoreObject()
+            local player = QBCore.Functions.GetPlayer(playerId)
+            if player and player.PlayerData.job.name == group then return true end -- Or check ACE groups if using qb-adminmenu
+        ]]
+    end
     end
     return false
 end
 
--- Security related functions
+
+-- #############################################################################
+-- ## CRITICAL SECURITY WARNING ##
+-- The following security functions are INSECURE PLACEHOLDERS.
+-- They offer minimal protection against determined attackers.
+-- You MUST replace these with a robust, server-authoritative implementation
+-- (e.g., using HMAC signing, proper session management) for real security.
+-- #############################################################################
+
+-- Placeholder: Insecure client hash validation - DO NOT USE IN PRODUCTION
+-- @param hash The client-provided hash string.
+-- @return boolean Always returns true in this placeholder implementation after basic checks.
 function ValidateClientHash(hash)
-    -- In a real implementation, this would validate against expected values
-    return hash and string.len(hash) > 10
+    Log("^1SECURITY WARNING: Using insecure placeholder ValidateClientHash. This provides NO real security.^7", 1)
+    -- This basic check is easily bypassed. A real implementation is complex and often futile.
+    -- Consider removing client hash checks entirely unless you have a specific, robust method.
+    return hash and type(hash) == "string" and string.len(hash) > 10
 end
 
+-- Placeholder: Insecure token generation - DO NOT USE IN PRODUCTION
+-- @param playerId The server ID of the player requesting a token.
+-- @return string An insecure, predictable token.
 function GenerateSecurityToken(playerId)
-    local token = GetPlayerName(playerId) .. "_" .. os.time() .. "_" .. math.random(100000, 999999)
-    -- In a real implementation, you'd want to store this somewhere secure
-    -- For now, we'll store it in the player metrics
-    if PlayerMetrics[playerId] then
-        PlayerMetrics[playerId].securityToken = token
+    Log("^1SECURITY WARNING: Using insecure placeholder GenerateSecurityToken. This is NOT secure.^7", 1)
+    -- This token is predictable and not cryptographically secure.
+    -- A real implementation should use HMAC signing or similar server-authoritative methods.
+    local insecureToken = GetPlayerName(playerId) .. "_" .. os.time() .. "_" .. math.random(100000, 999999)
+    -- Storing token directly in PlayerMetrics is also insecure if metrics are accessible/modifiable.
+    if _G.PlayerMetrics and _G.PlayerMetrics[playerId] then
+        _G.PlayerMetrics[playerId].securityToken = insecureToken
     end
-    return token
+    return insecureToken
 end
 
+-- Placeholder: Insecure token validation - DO NOT USE IN PRODUCTION
+-- @param playerId The server ID of the player sending the token.
+-- @param token The token string sent by the client.
+-- @return boolean True if the insecure token matches the stored one, false otherwise.
 function ValidateSecurityToken(playerId, token)
-    if not PlayerMetrics[playerId] then return false end
-    return PlayerMetrics[playerId].securityToken == token
+    Log("^1SECURITY WARNING: Using insecure placeholder ValidateSecurityToken. This provides NO real security.^7", 1)
+    -- This simply compares the received token with the insecurely stored one. It does not prevent spoofing.
+    if not _G.PlayerMetrics or not _G.PlayerMetrics[playerId] then return false end
+    -- Add basic type check for token
+    if type(token) ~= "string" then return false end
+    return _G.PlayerMetrics[playerId].securityToken == token
 end
 
--- Detection related functions
+-- #############################################################################
+-- ## END SECURITY WARNING ##
+-- #############################################################################
+
+
+-- Detection related functions (Placeholders/Examples)
+-- Placeholder: Needs refinement based on actual detection logic
+-- @param detectionType String identifier of the detection (e.g., "godmode").
+-- @return number An arbitrary severity score.
 function GetDetectionSeverity(detectionType)
+    -- Example severities, adjust based on impact and confidence
     local severities = {
         godmode = 50,
         speedhack = 30,
-        weaponmod = 40,
-        teleport = 25,
+        weaponmodification = 40, -- Match detector name
+        teleporting = 25,       -- Match detector name
         noclip = 45,
-        resourcehack = 75,
+        resourceinjection = 75, -- Match detector name (from config key)
         entityspam = 35,
         explosionspam = 40,
         menudetection = 60
+        -- Add other detection types here
     }
-    
     return severities[string.lower(detectionType)] or 20 -- Default severity
 end
 
+-- Placeholder: Needs refinement based on actual detection logic and severity
+-- @param detectionType String identifier of the detection.
+-- @param detectionData Table containing details about the detection.
+-- @return boolean True if considered high risk, false otherwise.
 function IsHighRiskDetection(detectionType, detectionData)
+    Log("Placeholder check: IsHighRiskDetection for " .. detectionType, 3)
+    -- Example: Consider resource injection and high-confidence menu detection high risk
+    -- IMPLEMENTATION REQUIRED: Define which detections warrant immediate action (kick/screenshot).
     local highRiskTypes = {
-        "godmode",
-        "menudetection",
-        "resourcehack"
+        "resourceinjection",
+        "menudetection"
     }
-    
+    local dtLower = string.lower(detectionType)
+
     for _, hrt in ipairs(highRiskTypes) do
-        if string.lower(detectionType) == hrt then
+        if dtLower == hrt then
+            -- Add confidence check for menu detection maybe?
             return true
         end
     end
-    
-    -- Check data for high risk indicators
-    if detectionData and type(detectionData) == "table" then
-        if detectionData.confidence and detectionData.confidence > 0.8 then
-            return true
-        end
-        
-        if detectionData.severity and detectionData.severity > 40 then
-            return true
-        end
-    end
-    
     return false
 end
 
+-- Placeholder: Needs refinement based on actual detection logic and severity
+-- @param detectionType String identifier of the detection.
+-- @param detectionData Table containing details about the detection.
+-- @return boolean True if considered a confirmed cheat (warrants ban), false otherwise.
 function IsConfirmedCheat(detectionType, detectionData)
-    -- Detections that are always confirmed cheats
-    local confirmedTypes = {
-        "resourcehack",
-        "injectiondetected",
-        "menudetected"
-    }
-    
-    for _, ct in ipairs(confirmedTypes) do
-        if string.lower(detectionType) == ct then
-            return true
-        end
+    Log("Placeholder check: IsConfirmedCheat for " .. detectionType, 3)
+    -- Example: Assume resource injection is always confirmed (server verified)
+    -- IMPLEMENTATION REQUIRED: Define which detections are severe enough for an automatic ban.
+    if string.lower(detectionType) == "resourceinjection" then
+        return true
     end
-    
-    -- Check data for confirmation
-    if detectionData and type(detectionData) == "table" then
-        if detectionData.confirmed == true then
-            return true
-        end
-        
-        if detectionData.confidence and detectionData.confidence > 0.9 then
-            return true
-        end
-    end
-    
+    -- Add other conditions based on data/confidence if needed
     return false
 end
 
--- AI related functions
+
+-- #############################################################################
+-- ## AI Function Placeholders ##
+-- These require a dedicated AI model and implementation.
+-- #############################################################################
+
+-- Placeholder: Needs actual feature engineering for your chosen AI model.
+-- @param metrics Player's current metrics table.
+-- @param detectionType String identifier of the detection.
+-- @param detectionData Table containing details about the detection.
+-- @return table A feature vector suitable for your AI model.
 function BuildFeatureVector(metrics, detectionType, detectionData)
-    -- This would extract relevant features for AI analysis
+    Log("Placeholder: Building feature vector", 3)
+    -- IMPLEMENTATION REQUIRED: Extract relevant features based on your AI model's needs.
     local featureVector = {
-        warningCount = metrics.warningCount or 0,
-        detectionCount = #(metrics.detections or {}),
-        playTime = os.time() - (metrics.connectTime or os.time()),
-        trustScore = metrics.trustScore or 100,
-        detectionType = detectionType,
-        -- Add more features based on detection data
+        warningCount = metrics and metrics.warningCount or 0,
+        detectionCount = metrics and #(metrics.detections or {}) or 0,
+        playTime = metrics and (os.time() - (metrics.connectTime or os.time())) or 0,
+        trustScore = metrics and metrics.trustScore or 100,
+        detectionType = detectionType
+        -- Add more features based on detection data and metrics
     }
-    
     return featureVector
 end
 
+-- Placeholder: Needs actual AI model inference.
+-- @param featureVector The feature vector generated by BuildFeatureVector.
+-- @return number An anomaly score (e.g., 0.0 to 1.0).
 function CalculateAnomalyScore(featureVector)
-    -- In a real implementation, this would use the AI model to calculate an anomaly score
-    -- For now, return a simple score based on basic metrics
-    local score = 0.3 -- baseline score
-    
-    if featureVector.warningCount > 2 then
-        score = score + 0.2
-    end
-    
-    if featureVector.detectionCount > 3 then
-        score = score + 0.3
-    end
-    
-    if featureVector.trustScore < 50 then
-        score = score + 0.2
-    end
-    
-    return math.min(score, 1.0) -- Cap at 1.0
+    Log("Placeholder: Calculating anomaly score", 3)
+    -- IMPLEMENTATION REQUIRED: Use your loaded anomaly detection model.
+    -- Example placeholder logic:
+    local score = 0.3
+    if featureVector.warningCount > 1 then score = score + 0.1 end
+    if featureVector.detectionCount > 2 then score = score + 0.2 end
+    if featureVector.trustScore < 70 then score = score + 0.15 end
+    return math.min(score, 1.0)
 end
 
+-- Placeholder: Needs actual AI model inference.
+-- @param featureVector The feature vector.
+-- @param behaviorProfile Stored behavior profile for the player (if used).
+-- @return table Containing AI verdict (confidence, action suggestion, etc.).
 function AnalyzeBehaviorPattern(featureVector, behaviorProfile)
-    -- This would analyze the player's behavior pattern using the AI model
-    -- For now, return a simple verdict
+    Log("Placeholder: Analyzing behavior pattern", 3)
+    -- IMPLEMENTATION REQUIRED: Use your loaded behavior analysis model.
+    -- Example placeholder logic:
     return {
-        confidence = 0.5,
-        suspicious = featureVector.warningCount > 1,
-        reasoning = "Behavior analysis based on " .. featureVector.detectionCount .. " detections"
+        confidence = 0.4,
+        suspicious = featureVector.warningCount > 0 or featureVector.detectionCount > 1,
+        reasoning = "Placeholder behavior analysis"
     }
 end
 
+-- Placeholder: Needs implementation to fetch/update models from a source.
 function UpdateAIModels()
-    AC.utils.log("Checking for AI model updates...", 2)
-    -- In a real implementation, this would update the AI models
-    -- For now, just log a message
-    AC.utils.log("AI models are up to date", 2)
+    Log("Placeholder: Checking for AI model updates...", 2)
+    -- IMPLEMENTATION REQUIRED: Logic to download/update AI model files if needed.
+    Log("Placeholder: AI models are up to date", 2)
 end
 
--- Event handling functions
+-- #############################################################################
+-- ## End AI Placeholders ##
+-- #############################################################################
+
+
+-- Event handling functions (Example implementations)
 function HandleExplosionEvent(sender, ev)
-    -- Check for explosion spam or illegal explosions
-    if ev and PlayerMetrics[sender] then
-        local explosionType = ev.explosionType
-        local position = vector3(ev.posX, ev.posY, ev.posZ)
-        
-        -- Track explosions in player metrics
-        if not PlayerMetrics[sender].explosions then
-            PlayerMetrics[sender].explosions = {}
+    -- Ensure sender and metrics exist
+    if not sender or sender <= 0 or not _G.PlayerMetrics or not _G.PlayerMetrics[sender] then return end
+    -- Ensure event data is valid
+    if not ev or not ev.explosionType then return end
+
+    local metrics = _G.PlayerMetrics[sender]
+    local explosionType = ev.explosionType
+    local position = vector3(ev.posX or 0, ev.posY or 0, ev.posZ or 0)
+
+    -- Track explosions
+    if not metrics.explosions then metrics.explosions = {} end
+    table.insert(metrics.explosions, { type = explosionType, position = position, time = os.time() })
+
+    -- Check for spam (e.g., > 5 in 10 seconds)
+    local recentCount = 0
+    local currentTime = os.time()
+    local tempExplosions = {} -- Keep track of non-expired explosions
+    for i = #metrics.explosions, 1, -1 do -- Iterate backwards for safe removal/filtering
+        local explosion = metrics.explosions[i]
+        if currentTime - explosion.time < 10 then
+            recentCount = recentCount + 1
+            table.insert(tempExplosions, 1, explosion) -- Keep this one (insert at beginning if order matters)
         end
-        
-        table.insert(PlayerMetrics[sender].explosions, {
-            type = explosionType,
-            position = position,
-            time = os.time()
-        })
-        
-        -- Check for explosion spam (more than 5 in 10 seconds)
-        local recentExplosions = 0
-        local currentTime = os.time()
-        for _, explosion in ipairs(PlayerMetrics[sender].explosions) do
-            if currentTime - explosion.time < 10 then
-                recentExplosions = recentExplosions + 1
-            end
-        end
-        
-        if recentExplosions > 5 then
-            ProcessDetection(sender, "explosionspam", { count = recentExplosions, period = "10s" })
+    end
+    metrics.explosions = tempExplosions -- Update table to only contain recent ones
+
+    if recentCount > 5 then
+        -- Ensure ProcessDetection is available globally
+        if _G.ProcessDetection then
+            _G.ProcessDetection(sender, "explosionspam", { count = recentCount, period = "10s" })
+        else
+            Log("^1Error: ProcessDetection function not found!^7", 1)
         end
     end
 end
 
+-- Placeholder: Needs implementation - Be VERY careful with performance here.
+-- @param entity The handle of the created entity.
 function HandleEntityCreation(entity)
-    if not entity then return end
-    
-    local entityType = GetEntityType(entity)
-    local owner = NetworkGetEntityOwner(entity)
-    
-    if owner > 0 and PlayerMetrics[owner] then
-        -- Track entity creation in player metrics
-        if not PlayerMetrics[owner].entities then
-            PlayerMetrics[owner].entities = {}
+    -- This requires careful implementation to avoid performance issues
+    -- and false positives. Consider what entities are relevant to track (e.g., specific props, vehicles).
+    -- Avoid tracking every single entity. Filter by type or model hash.
+    -- Log("Placeholder: HandleEntityCreation called for entity " .. entity, 3)
+    --[[
+        IMPLEMENTATION REQUIRED (Example structure):
+        local entityType = GetEntityType(entity)
+        local model = GetEntityModel(entity)
+        -- Check if model is blacklisted or type is suspicious
+        if IsModelBlacklisted(model) then
+             local owner = NetworkGetEntityOwner(entity)
+             if owner > 0 then
+                 ProcessDetection(owner, "blacklistedentity", { model = model })
+             end
         end
-        
-        table.insert(PlayerMetrics[owner].entities, {
-            type = entityType,
-            time = os.time(),
-            netId = NetworkGetNetworkIdFromEntity(entity)
-        })
-        
-        -- Check for entity spam (more than 10 in 60 seconds)
-        local recentEntities = 0
-        local currentTime = os.time()
-        for _, entityData in ipairs(PlayerMetrics[owner].entities) do
-            if currentTime - entityData.time < 60 then
-                recentEntities = recentEntities + 1
-            end
-        end
-        
-        if recentEntities > 10 then
-            ProcessDetection(owner, "entityspam", { count = recentEntities, period = "60s" })
-        end
-    end
+        -- Add spam checks similar to HandleExplosionEvent if needed
+    ]]
 end
+
 
 -- Utility functions
+-- Placeholder: Needs actual database implementation if enabled.
 function CollectPlayerMetrics()
-    for playerId, metrics in pairs(PlayerMetrics) do
-        if GetPlayerName(playerId) then
-            local ped = GetPlayerPed(playerId)
-            if ped and DoesEntityExist(ped) then
-                -- Update player position
-                metrics.lastPosition = GetEntityCoords(ped)
-                
-                -- Update health data
-                local health = GetEntityHealth(ped)
-                table.insert(metrics.healthHistory, { health = health, time = os.time() })
-                
-                -- Limit history size
-                if #metrics.healthHistory > 20 then
-                    table.remove(metrics.healthHistory, 1)
-                end
-                
-                -- Other metrics would be collected here
-            end
-        end
-    end
+    if not Config or not Config.Database or not Config.Database.enabled then return end
+    Log("Placeholder: Collecting player metrics...", 3)
+    -- IMPLEMENTATION REQUIRED: Logic to periodically gather and potentially store
+    -- aggregated metrics in the database for analysis or long-term tracking.
 end
 
+-- Placeholder: Needs actual database implementation if enabled.
 function CleanupDetectionHistory()
-    local currentTime = os.time()
-    local threshold = currentTime - (Config.Database.historyDuration * 86400) -- Convert days to seconds
-    
-    for id, history in pairs(DetectionHistory) do
-        local newHistory = {}
-        for _, detection in ipairs(history) do
-            if detection.timestamp > threshold then
-                table.insert(newHistory, detection)
-            end
-        end
-        DetectionHistory[id] = newHistory
-    end
-    
-    AC.utils.log("Cleaned up detection history", 3)
+    if not Config or not Config.Database or not Config.Database.enabled then return end
+    Log("Placeholder: Cleaning up detection history...", 3)
+    -- IMPLEMENTATION REQUIRED: Logic to delete old detection records from the database
+    -- based on Config.Database.historyDuration.
+    -- Example: MySQL.Async.execute('DELETE FROM nexusguard_detections WHERE timestamp < DATE_SUB(NOW(), INTERVAL @days DAY)', {['@days'] = Config.Database.historyDuration})
 end
 
+-- Placeholder: Needs actual database implementation if enabled.
+-- @param playerId Server ID of the player whose metrics should be saved.
 function SavePlayerMetrics(playerId)
-    if not Config.Database.enabled or not PlayerMetrics[playerId] then return end
-    
-    -- In a real implementation, this would save to a database
-    -- For now, just log a message
-    AC.utils.log("Saving metrics for player " .. playerId, 3)
+    if not Config or not Config.Database or not Config.Database.enabled then return end
+    if not _G.PlayerMetrics or not _G.PlayerMetrics[playerId] then return end
+    Log("Placeholder: Saving metrics for player " .. playerId, 3)
+    -- IMPLEMENTATION REQUIRED: Logic to save relevant player metrics (e.g., final trust score,
+    -- total detections, playtime) to the database when they disconnect.
+    -- Example: MySQL.Async.execute('INSERT INTO nexusguard_sessions (...) VALUES (...) ON DUPLICATE KEY UPDATE ...', {...})
 end
+
 
 -- Discord related functions
 function SendToDiscord(title, message)
-    if not Config.EnableDiscordLogs then return end
-    
-    if Config.DiscordWebhook and Config.DiscordWebhook ~= "" then
-        local embed = {
-            {
-                ["color"] = 16711680, -- Red
-                ["title"] = title,
-                ["description"] = message,
-                ["footer"] = {
-                    ["text"] = "NexusGuard Anti-Cheat | " .. os.date("%Y-%m-%d %H:%M:%S")
-                }
+    -- Check if logging and webhook URL are enabled/set
+    if not Config or not Config.EnableDiscordLogs or not Config.DiscordWebhook or Config.DiscordWebhook == "" then
+        return
+    end
+
+    local webhookURL = Config.DiscordWebhook
+    local embed = {
+        {
+            ["color"] = 16711680, -- Red
+            ["title"] = "**[NexusGuard] " .. (title or "Alert") .. "**",
+            ["description"] = message or "No details provided.",
+            ["footer"] = {
+                ["text"] = "NexusGuard | " .. os.date("%Y-%m-%d %H:%M:%S")
             }
         }
-        
-        PerformHttpRequest(Config.DiscordWebhook, function(err, text, headers) end, 'POST', json.encode({ embeds = embed }), { ['Content-Type'] = 'application/json' })
+    }
+
+    -- Ensure JSON library is available
+    if not json then
+        Log("^1Error: JSON library not available for SendToDiscord.^7", 1)
+        return
     end
+
+    local payloadSuccess, payload = pcall(json.encode, { embeds = embed })
+    if not payloadSuccess then
+        Log("^1Error encoding Discord payload: " .. tostring(payload) .. "^7", 1)
+        return
+    end
+
+    -- Perform the HTTP request asynchronously
+    PerformHttpRequest(webhookURL, function(err, text, headers)
+        if err then
+            Log("^1Error sending Discord webhook: " .. tostring(err) .. "^7", 1)
+        else
+            Log("Discord notification sent: " .. title, 3)
+        end
+    end, 'POST', payload, { ['Content-Type'] = 'application/json' })
 end
 
--- Export globals for other resources
-exports('getAntiCheatConfig', function()
-    return AC.config
-end)
 
-exports('getAntiCheatUtils', function()
-    return AC.utils
-end)
+-- Helper to safely get players list
+function SafeGetPlayers()
+    local success, players = pcall(GetPlayers)
+    if success and type(players) == "table" then
+        return players
+    end
+    return {}
+end
 
-exports('getNexusGuardAPI', function()
+
+-- Exports for potential external use (Keep minimal and specific)
+-- Note: Avoid exporting sensitive functions like BanPlayer directly if possible,
+-- prefer command-based access or specific integration points.
+exports('GetNexusGuardAPI', function()
     return {
-        banPlayer = BanPlayer,
-        isPlayerBanned = IsPlayerBanned,
-        sendToDiscord = SendToDiscord
+        -- Expose specific, safe functions if needed by other resources
+        -- Example: Check if a player is currently flagged (requires implementation)
+        -- isPlayerFlagged = function(playerId) ... end,
+
+        -- Allow reporting from other resources (requires careful validation server-side)
+        -- reportSuspiciousActivity = function(reporterId, targetId, reason) ... end
     }
 end)
 
-function SafeGetPlayers()
-    if not GetPlayers then return {} end
-    local players = GetPlayers()
-    return type(players) == "table" and players or {}
-end
+-- Expose necessary functions globally if needed by server_main (consider alternatives)
+-- These were previously defined in server_main or expected globally
+_G.LoadBanList = LoadBanList
+_G.SaveBanList = SaveBanList
+_G.IsPlayerBanned = IsPlayerBanned
+_G.StorePlayerBan = StorePlayerBan
+_G.IsPlayerAdmin = IsPlayerAdmin
+_G.ValidateClientHash = ValidateClientHash
+_G.GenerateSecurityToken = GenerateSecurityToken
+_G.ValidateSecurityToken = ValidateSecurityToken
+_G.GetDetectionSeverity = GetDetectionSeverity
+_G.IsHighRiskDetection = IsHighRiskDetection
+_G.IsConfirmedCheat = IsConfirmedCheat
+_G.BuildFeatureVector = BuildFeatureVector
+_G.CalculateAnomalyScore = CalculateAnomalyScore
+_G.AnalyzeBehaviorPattern = AnalyzeBehaviorPattern
+_G.UpdateAIModels = UpdateAIModels
+_G.HandleExplosionEvent = HandleExplosionEvent
+_G.HandleEntityCreation = HandleEntityCreation
+_G.CollectPlayerMetrics = CollectPlayerMetrics
+_G.CleanupDetectionHistory = CleanupDetectionHistory
+_G.SavePlayerMetrics = SavePlayerMetrics
+_G.SendToDiscord = SendToDiscord
+_G.SafeGetPlayers = SafeGetPlayers
+_G.Log = Log -- Expose Log function if needed elsewhere
+
+Log("NexusGuard globals and helpers loaded.", 2)
