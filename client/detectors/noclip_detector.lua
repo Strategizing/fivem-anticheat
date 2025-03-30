@@ -1,14 +1,25 @@
 local DetectorName = "noclip" -- Match the key in Config.Detectors
+local NexusGuard = nil -- Local variable to hold the NexusGuard instance
+
 local Detector = {
     active = false,
     interval = 1000, -- Default, will be overridden by config if available
     lastCheck = 0
 }
 
--- Initialize the detector (called once)
-function Detector.Initialize()
+-- Initialize the detector (called once by the registry)
+-- Receives the NexusGuard instance from the registry
+function Detector.Initialize(nexusGuardInstance)
+    if not nexusGuardInstance then
+        print("^1[NexusGuard:" .. DetectorName .. "] CRITICAL: Failed to receive NexusGuard instance during initialization.^7")
+        return false
+    end
+    NexusGuard = nexusGuardInstance -- Store the instance locally
+
     -- Update interval from global config if available
-    if Config and Config.Detectors and Config.Detectors.noclip and NexusGuard and NexusGuard.intervals and NexusGuard.intervals.noclip then
+    -- Access Config via the passed instance
+    local cfg = NexusGuard.Config
+    if cfg and cfg.Detectors and cfg.Detectors.noclip and NexusGuard.intervals and NexusGuard.intervals.noclip then
         Detector.interval = NexusGuard.intervals.noclip
     end
     print("^2[NexusGuard:" .. DetectorName .. "]^7 Initialized with interval: " .. Detector.interval .. "ms")
@@ -37,7 +48,9 @@ end
 -- Check for violations (Moved logic from client_main.lua)
 function Detector.Check()
     -- Cache config values locally
-    local noclipTolerance = (Config and Config.Thresholds and Config.Thresholds.noclipTolerance) or 3.0
+    -- Access Config via the stored NexusGuard instance
+    local cfg = NexusGuard.Config
+    local noclipTolerance = (cfg and cfg.Thresholds and cfg.Thresholds.noclipTolerance) or 3.0
 
     local ped = PlayerPedId()
 
@@ -87,10 +100,17 @@ function Detector.Check()
                         reportReason = reportReason .. " and collision disabled"
                     end
 
-                    if _G.NexusGuard and _G.NexusGuard.ReportCheat then
-                        _G.NexusGuard:ReportCheat(DetectorName, reportReason)
+                    -- Use the stored NexusGuard instance to report
+                    if NexusGuard and NexusGuard.ReportCheat then
+                        local details = {
+                            reason = reportReason,
+                            distance = distanceToGround,
+                            velocityZ = zVelocity,
+                            collision = collisionDisabled
+                        }
+                        NexusGuard:ReportCheat(DetectorName, details)
                     else
-                         print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation: " .. reportReason .. " (NexusGuard global unavailable)")
+                         print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation: " .. reportReason .. " (NexusGuard instance unavailable)")
                     end
                 end
             end
@@ -117,20 +137,12 @@ function Detector.GetStatus()
 end
 
 -- Register with the detector system
+-- NOTE: The registry now handles calling Initialize and Start based on config.
 Citizen.CreateThread(function()
-    -- Wait for NexusGuard and DetectorRegistry to initialize
-    while not _G.NexusGuard or not _G.DetectorRegistry do
+    -- Wait for DetectorRegistry to be available
+    while not _G.DetectorRegistry do
         Citizen.Wait(500)
     end
-
-    -- Initialize after registry is ready
-    Detector.Initialize()
     _G.DetectorRegistry.Register(DetectorName, Detector)
-
-    -- Auto-start if enabled in config
-    if Config and Config.Detectors and Config.Detectors[DetectorName] then
-         -- Small delay to ensure NexusGuard is fully ready
-         Citizen.Wait(100)
-        _G.DetectorRegistry.Start(DetectorName)
-    end
+    -- Initialization and starting is now handled by the registry calling the methods on the registered module
 end)

@@ -31,6 +31,12 @@ NexusGuard is a modular, event-driven anti-cheat framework designed for FiveM se
 
 ## Installation
 
+1. Clone or download the repository into your `resources` folder.
+2. Add `ensure NexusGuard` to your `server.cfg`.
+3. Ensure dependencies like `oxmysql` and `screenshot-basic` are installed and started before NexusGuard.
+4. Configure `config.lua` to match your server's setup.
+5. Import the SQL schema (`sql/schema.sql`) into your database.
+
 1.  **Download:** Download the latest release (v0.6.9) of NexusGuard.
 2.  **Extract:** Extract the `NexusGuard` folder into your server's `resources` directory.
 3.  **Dependencies:** Ensure **oxmysql** and **screenshot-basic** are installed and listed in your `server.cfg` to start *before* NexusGuard. Install optional dependencies (like `chat`) as needed. **Note:** The `shared/event_registry.lua` included in this resource is essential for its operation.
@@ -52,9 +58,6 @@ NexusGuard is a modular, event-driven anti-cheat framework designed for FiveM se
     *   **(Optional) AI & Other Placeholders:** Review other functions marked as placeholders (AI functions, `HandleEntityCreation`) and implement them if you intend to use those features.
 7.  **Server Config:** Add `ensure NexusGuard` to your `server.cfg`, ensuring it starts *after* its dependencies (`oxmysql`, `screenshot-basic`, `ox_lib`, and potentially `es_extended` or `qb-core` if selected).
 8.  **Restart Server & Test:** Restart your FiveM server. Check the console thoroughly for any NexusGuard errors or warnings (especially critical ones about missing dependencies or security). Test detections and actions rigorously, paying close attention to admin checks.
-    *   **(Optional) AI & Other Placeholders:** Review other functions marked as placeholders (AI functions, `HandleEntityCreation`) and implement them if you intend to use those features.
-7.  **Server Config:** Add `ensure NexusGuard` to your `server.cfg`, ensuring it starts *after* its dependencies (`oxmysql`, `screenshot-basic`, `ox_lib`).
-8.  **Restart Server & Test:** Restart your FiveM server. Check the console thoroughly for any NexusGuard errors or warnings (especially critical ones about missing functions or security). Test detections and actions rigorously.
 
 ## Configuration Deep Dive
 
@@ -86,6 +89,14 @@ NexusGuard is a modular, event-driven anti-cheat framework designed for FiveM se
         3.  Ensure `ensure ox_lib` is listed **before** `ensure NexusGuard` in your `server.cfg`.
         4.  Restart your server.
 
+*   **`ox_lib` Crypto Errors / Security Token System Disabled:**
+    *   **Cause:** `ox_lib` is not started before NexusGuard, is outdated, or its crypto module failed to load.
+    *   **Solution:**
+        1.  Ensure `ensure ox_lib` is listed **before** `ensure NexusGuard` in your `server.cfg`.
+        2.  Update `ox_lib` to its latest version.
+        3.  Check the server console during startup for any errors specifically from `ox_lib`.
+        4.  Restart your server.
+
 *   **Players Kicked/Banned Incorrectly by Resource Verification:**
     *   **Cause:** If using `Config.Features.resourceVerification.mode = "whitelist"`, you haven't added all essential server resources to the `whitelist` table in `config.lua`.
     *   **Solution:**
@@ -101,9 +112,13 @@ NexusGuard is a modular, event-driven anti-cheat framework designed for FiveM se
 *   **Admin Commands Don't Work / Not Detected as Admin:**
     *   **Cause:** `Config.PermissionsFramework` is not set correctly, `Config.AdminGroups` doesn't match your framework's groups, or the required framework (ESX/QBCore) isn't started before NexusGuard.
     *   **Solution:**
-        1.  Verify `Config.PermissionsFramework` in `config.lua` matches your server ("ace", "esx", "qbcore").
-        2.  Verify `Config.AdminGroups` contains the exact group names used by your framework for admins (case-sensitive). Check your framework's documentation or database if unsure.
-        3.  If using "esx" or "qbcore", ensure `ensure es_extended` or `ensure qb-core` is listed **before** `ensure NexusGuard` in your `server.cfg`.
+        1.  **Verify `Config.PermissionsFramework`:** Open `config.lua` and ensure `Config.PermissionsFramework` is set to `"ace"`, `"esx"`, or `"qbcore"` to match your server setup. If you have custom permission logic, set it to `"custom"` and implement it in `globals.lua`.
+        2.  **Verify `Config.AdminGroups`:** Ensure this table in `config.lua` contains the *exact* group names (case-sensitive!) that signify admin privileges in your framework.
+            *   **ACE:** Check your `server.cfg` for `add_principal identifier.license:<your_license> group.admin` (or similar group name). The group name here must be in `Config.AdminGroups`.
+            *   **ESX:** Check your `users` and `groups` tables in the database. Find your user record and see which group they belong to (e.g., `superadmin`, `admin`). That group name must be in `Config.AdminGroups`.
+            *   **QBCore:** Check your framework's permission setup (often in `shared/permissions.lua` or similar within `qb-core`). Identify the highest permission group(s) (e.g., `god`, `admin`) and ensure they are listed in `Config.AdminGroups`.
+        3.  **Check Resource Start Order:** If using `"esx"` or `"qbcore"`, ensure `ensure es_extended` or `ensure qb-core` is listed **before** `ensure NexusGuard` in your `server.cfg`. The framework needs to load first.
+        4.  **Restart & Test:** After making changes, restart your server and test admin commands again.
 
 *   **Database Errors (Connection, Schema):**
     *   **Cause:** `oxmysql` is not configured correctly, not started before NexusGuard, or the database schema wasn't imported.

@@ -121,8 +121,7 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         initialized = false
         -- Note: Version is defined in fxmanifest.lua
     }
-    -- Expose NexusGuard globally for detectors
-    _G.NexusGuard = NexusGuard
+    -- _G.NexusGuard = NexusGuard -- REMOVED GLOBAL EXPOSURE
 
     --[[
         Safe Detection Wrapper
@@ -203,27 +202,43 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
             -- Allow time for token receipt
             Citizen.Wait(2000)
 
-        -- Start auxiliary protection modules (like Rich Presence)
-        -- Detectors are started automatically via their registration block in detector_registry.lua
-        self:StartProtectionModules()
+            -- Start auxiliary protection modules (like Rich Presence)
+            -- Detectors are started automatically via their registration block in detector_registry.lua
+            self:StartProtectionModules()
 
-        -- Start periodic position update thread
-        Citizen.CreateThread(function()
-            local positionUpdateInterval = 5000 -- ms (e.g., every 5 seconds)
-            while true do
-                Citizen.Wait(positionUpdateInterval)
-                -- Only send updates if initialized and token is valid
-                if self.initialized and self.securityToken and type(self.securityToken) == "table" then
-                    self:SendPositionUpdate()
-                    self:SendHealthUpdate() -- Add health update call
+            -- Pass the NexusGuard instance to the registry
+            if _G.DetectorRegistry and _G.DetectorRegistry.SetNexusGuardInstance then
+                _G.DetectorRegistry:SetNexusGuardInstance(self) -- Pass the NexusGuard instance (self)
+                -- Trigger the registry to start enabled detectors now that the instance is set
+                if _G.DetectorRegistry.StartEnabledDetectors then
+                    Citizen.CreateThread(function()
+                        Citizen.Wait(100) -- Short delay to ensure detectors are registered
+                        _G.DetectorRegistry:StartEnabledDetectors()
+                    end)
+                else
+                    print("^1[NexusGuard] CRITICAL: DetectorRegistry.StartEnabledDetectors not found! Detectors will not auto-start.^7")
                 end
+            else
+                print("^1[NexusGuard] CRITICAL: DetectorRegistry or SetNexusGuardInstance not found! Detectors cannot be started.^7")
             end
-        end)
-        print('^2[NexusGuard]^7 Position update thread started.')
 
-        self.initialized = true
-        print('^2[NexusGuard]^7 Core protection system initialized')
-        end)
+            -- Start periodic position and health update thread
+            Citizen.CreateThread(function()
+                local positionUpdateInterval = 5000 -- ms (e.g., every 5 seconds)
+                while true do
+                    Citizen.Wait(positionUpdateInterval)
+                    -- Only send updates if initialized and token is valid
+                    if self.initialized and self.securityToken and type(self.securityToken) == "table" then
+                        self:SendPositionUpdate()
+                        self:SendHealthUpdate() -- Add health update call
+                    end
+                end
+            end)
+            print('^2[NexusGuard]^7 Position update thread started.')
+
+            self.initialized = true
+            print('^2[NexusGuard]^7 Core protection system initialized')
+        end) -- Add missing end for Citizen.CreateThread
     end
 
     --[[
@@ -266,14 +281,14 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         -- Set up presence update thread
         Citizen.CreateThread(function()
             while true do
-                 -- Check config again inside loop in case it changes dynamically or resource restarts
-                 local currentRpConfig = Config and Config.Discord and Config.Discord.RichPresence
-                 -- Also check if AppId is still valid (in case config was reloaded badly)
-                 if not currentRpConfig or not currentRpConfig.Enabled or not currentRpConfig.AppId or currentRpConfig.AppId == "" or currentRpConfig.AppId == "1234567890" then
-                     print("^3[NexusGuard] Rich Presence disabled or AppId invalid, stopping update thread.^7")
-                     ClearDiscordPresence() -- Clear presence if disabled
-                     break -- Exit the loop
-                 end
+                -- Check config again inside loop in case it changes dynamically or resource restarts
+                local currentRpConfig = Config and Config.Discord and Config.Discord.RichPresence
+                -- Also check if AppId is still valid (in case config was reloaded badly)
+                if not currentRpConfig or not currentRpConfig.Enabled or not currentRpConfig.AppId or currentRpConfig.AppId == "" or currentRpConfig.AppId == "1234567890" then
+                    print("^3[NexusGuard] Rich Presence disabled or AppId invalid, stopping update thread.^7")
+                    ClearDiscordPresence() -- Clear presence if disabled
+                    break -- Exit the loop
+                end
 
                 -- Update presence only if enabled and AppId is valid
                 self:UpdateRichPresence()
@@ -309,7 +324,7 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
             SetDiscordRichPresenceAssetSmall(rpConfig.smallImageKey)
             SetDiscordRichPresenceAssetSmallText(rpConfig.SmallImageText or "") -- Use configured text or empty string
         else
-             ClearDiscordRichPresenceAssetSmall() -- Clear small asset if not configured
+            ClearDiscordRichPresenceAssetSmall() -- Clear small asset if not configured
         end
 
         -- Set action buttons
@@ -428,15 +443,15 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         AddEventHandler(receiveTokenEvent, function(tokenData)
             -- Expecting a table { timestamp = ..., signature = ... }
             if not tokenData or type(tokenData) ~= "table" or not tokenData.timestamp or not tokenData.signature then
-                 print("^1[NexusGuard] Received invalid security token data structure from server.^7")
-                 -- Consider requesting again or handling error
-                 return
+                print("^1[NexusGuard] Received invalid security token data structure from server.^7")
+                -- Consider requesting again or handling error
+                return
             end
             NexusGuard.securityToken = tokenData -- Store the entire table
             print("^2[NexusGuard] Security handshake completed via " .. receiveTokenEvent .. "^7")
         end)
     else
-         print("^1[NexusGuard] CRITICAL: Could not get event name for SECURITY_RECEIVE_TOKEN from EventRegistry.^7")
+        print("^1[NexusGuard] CRITICAL: Could not get event name for SECURITY_RECEIVE_TOKEN from EventRegistry.^7")
     end
 
     -- Handler for the local warning event (doesn't need registry)
@@ -467,12 +482,12 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
 
         -- Check if screenshot feature and dependency are enabled/available
         if not Config or not Config.ScreenCapture or not Config.ScreenCapture.enabled then
-             print("^3[NexusGuard] Screenshot requested but feature is disabled in config.^7")
-             return
+            print("^3[NexusGuard] Screenshot requested but feature is disabled in config.^7")
+            return
         end
         if not exports['screenshot-basic'] then
-             print("^1[NexusGuard] Screenshot requested but 'screenshot-basic' resource/export not found. Ensure it's started.^7")
-             return
+            print("^1[NexusGuard] Screenshot requested but 'screenshot-basic' resource/export not found. Ensure it's started.^7")
+            return
         end
 
         -- Ensure webhookURL is configured
@@ -504,9 +519,9 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
                     print("^2[NexusGuard] Screenshot uploaded successfully: " .. screenshotUrl .. "^7")
                     -- Report screenshot taken back to server, sending the token table
                     if _G.EventRegistry then
-                         _G.EventRegistry.TriggerServerEvent('ADMIN_SCREENSHOT_TAKEN', screenshotUrl, NexusGuard.securityToken)
+                        _G.EventRegistry.TriggerServerEvent('ADMIN_SCREENSHOT_TAKEN', screenshotUrl, NexusGuard.securityToken)
                     else
-                         print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot report screenshot taken to server.^7")
+                        print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot report screenshot taken to server.^7")
                     end
                 else
                     -- Log the raw response if decoding fails or structure is unexpected

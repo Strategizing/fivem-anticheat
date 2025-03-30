@@ -2,8 +2,9 @@ Config = {}
 
 -- General Settings
 Config.ServerName = "Your Server Name" -- Your server name
-Config.EnableDiscordLogs = true -- Enable Discord webhook logs
-Config.DiscordWebhook = "" -- Your Discord webhook URL
+Config.LogLevel = 2 -- 0=Error, 1=Warn, 2=Info, 3=Debug (Affects server console logs)
+Config.EnableDiscordLogs = true -- Enable Discord webhook logs (Separate from LogLevel)
+Config.DiscordWebhook = "" -- Your Discord webhook URL (General logs if specific webhooks below aren't set)
 Config.BanMessage = "You have been banned for cheating. Appeal at: discord.gg/yourserver" -- Ban message
 Config.KickMessage = "You have been kicked for suspicious activity." -- Kick message
 
@@ -17,8 +18,9 @@ Config.KickMessage = "You have been kicked for suspicious activity." -- Kick mes
 Config.PermissionsFramework = "ace" -- Default to ACE permissions
 
 Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups considered admin by the selected framework check (case-sensitive depending on framework)
+-- Example ACE groups (default): {"admin", "superadmin", "mod"}
 -- Example ESX groups: {"admin", "superadmin"}
--- Example QBCore groups: {"admin", "god"}
+-- Example QBCore groups: {"admin", "god"} -- Or other high-level permission groups defined in your QBCore setup
 
 -- !! CRITICAL !! Change this to a long, unique, random string for your server.
 -- This is used by the default secure token implementation (HMAC-SHA256 via ox_lib).
@@ -42,14 +44,19 @@ Config.Thresholds = {
     vehicleSpawnLimit = 5, -- Vehicles spawned per minute
     entitySpawnLimit = 15, -- Entities spawned per minute
     healthRegenerationRate = 2.0, -- Health regeneration rate threshold
-    aiDecisionConfidenceThreshold = 0.75 -- AI confidence threshold for automated action
+    aiDecisionConfidenceThreshold = 0.75, -- AI confidence threshold for automated action
+
+    -- Server-Side Validation Thresholds (Used by server checks, independent of client checks)
+    serverSideSpeedThreshold = 50.0, -- Max allowed speed in m/s based on server position checks (Approx 180 km/h). Tune carefully!
+    serverSideRegenThreshold = 3.0, -- Max allowed passive HP regen rate in HP/sec based on server health checks.
+    serverSideArmorThreshold = 105.0 -- Max allowed armor value based on server health checks (Allows slight buffer over 100).
 }
 
--- Server-Side Weapon Base Damage (for validation)
--- Add known base damage values for weapons here. This helps the server validate client reports.
--- Values can vary based on game version/mods. Use GetWeaponDamage native on a clean client/server to find defaults.
--- Key: Weapon Hash (use GetHashKey("WEAPON_PISTOL") etc.) Value: Base Damage (float)
-Config.WeaponBaseDamage = {
+-- Server-Side Weapon Base Data (for validation)
+-- Add known base values for weapons here. This helps the server validate client reports.
+-- Values can vary based on game version/mods. Use natives on a clean client/server to find defaults.
+-- Key: Weapon Hash (use GetHashKey("WEAPON_PISTOL") etc.)
+Config.WeaponBaseDamage = { -- Base Damage (float)
     [GetHashKey("WEAPON_PISTOL")] = 26.0,
     [GetHashKey("WEAPON_COMBATPISTOL")] = 27.0,
     [GetHashKey("WEAPON_APPISTOL")] = 28.0,
@@ -62,8 +69,23 @@ Config.WeaponBaseDamage = {
     [GetHashKey("WEAPON_SNIPERRIFLE")] = 100.0,
     -- Add more weapons as needed...
 }
+Config.WeaponBaseClipSize = { -- Base Clip Size (integer)
+    [GetHashKey("WEAPON_PISTOL")] = 12,
+    [GetHashKey("WEAPON_COMBATPISTOL")] = 12,
+    [GetHashKey("WEAPON_APPISTOL")] = 18,
+    [GetHashKey("WEAPON_MICROSMG")] = 16,
+    [GetHashKey("WEAPON_SMG")] = 30,
+    [GetHashKey("WEAPON_ASSAULTRIFLE")] = 30,
+    [GetHashKey("WEAPON_CARBINERIFLE")] = 30,
+    [GetHashKey("WEAPON_SPECIALCARBINE")] = 30,
+    [GetHashKey("WEAPON_PUMPSHOTGUN")] = 8,
+    [GetHashKey("WEAPON_SNIPERRIFLE")] = 10,
+    -- Add more weapons as needed...
+}
 
 -- Detection Types
+-- These flags enable/disable the *client-side* detector modules.
+-- Server-side checks (like speed, health, weapon validation) run based on received events, not these flags.
 Config.Detectors = {
     godMode = true,
     speedHack = true,
@@ -91,22 +113,10 @@ Config.Actions = {
     progressiveResponse = true -- Gradually increase response severity with repeated offenses
 }
 
--- AI Settings
-Config.AI = {
-    enabled = true,
-    modelUpdateInterval = 7, -- Days between model updates
-    playerDataSampleRate = 10, -- Seconds between player data sampling
-    adaptiveDetection = true, -- Adjust thresholds based on server-wide patterns
-    anomalyDetectionStrength = 0.8, -- Sensitivity for anomaly detection (0.0-1.0)
-    clusteringEnabled = true, -- Enable behavioral clustering
-    falsePositiveProtection = true, -- Additional checks to prevent false positives
-    reportAccuracy = true -- Report detection accuracy to central database to improve model
-}
-
 -- Optional Features
 Config.Features = {
-    adminPanel = true, -- Placeholder: Requires a UI and server-side logic implementation
-    playerReports = true, -- Placeholder: Requires UI/command and server-side logic implementation
+    -- adminPanel = true, -- Placeholder: Requires a UI and server-side logic implementation
+    -- playerReports = true, -- Placeholder: Requires UI/command and server-side logic implementation
     resourceVerification = {
         enabled = false, -- Verify integrity of client resources (EXPERIMENTAL - can cause false positives if not configured correctly)
         mode = "whitelist", -- "whitelist" or "blacklist"

@@ -17,11 +17,10 @@ shared_scripts {
     '@ox_lib/init.lua', -- Required for lib.crypto used in default secure token implementation
     'config.lua',
     'globals.lua', -- Contains helpers and PLACEHOLDERS requiring user implementation
-    'shared/detector_registry.lua',
+    'shared/detector_registry.lua', -- Ensure this is included
     'shared/event_registry.lua',
     'shared/version_compat.lua'
     -- NOTE: config_validator.lua, discord_config.lua, constants.lua are not used/present.
-    -- NOTE: load.lua is redundant and removed. Initialization happens in client_main/server_main.
 }
 
 client_scripts {

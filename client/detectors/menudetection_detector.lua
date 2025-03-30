@@ -1,14 +1,25 @@
 local DetectorName = "menuDetection" -- Match the key in Config.Detectors
+local NexusGuard = nil -- Local variable to hold the NexusGuard instance
+
 local Detector = {
     active = false,
     interval = 10000, -- Default, will be overridden by config if available
     lastCheck = 0
 }
 
--- Initialize the detector (called once)
-function Detector.Initialize()
+-- Initialize the detector (called once by the registry)
+-- Receives the NexusGuard instance from the registry
+function Detector.Initialize(nexusGuardInstance)
+    if not nexusGuardInstance then
+        print("^1[NexusGuard:" .. DetectorName .. "] CRITICAL: Failed to receive NexusGuard instance during initialization.^7")
+        return false
+    end
+    NexusGuard = nexusGuardInstance -- Store the instance locally
+
     -- Update interval from global config if available
-    if Config and Config.Detectors and Config.Detectors.menuDetection and NexusGuard and NexusGuard.intervals and NexusGuard.intervals.menuDetection then
+    -- Access Config via the passed instance
+    local cfg = NexusGuard.Config
+    if cfg and cfg.Detectors and cfg.Detectors.menuDetection and NexusGuard.intervals and NexusGuard.intervals.menuDetection then
         Detector.interval = NexusGuard.intervals.menuDetection
     end
     print("^2[NexusGuard:" .. DetectorName .. "]^7 Initialized with interval: " .. Detector.interval .. "ms")
@@ -38,22 +49,25 @@ end
 function Detector.Check()
     -- Basic check for common mod menu key combinations
     -- Note: This is very basic and easily bypassed. More advanced checks are needed.
-    -- Example: HOME key (178) + E key (51)
-    if IsControlJustPressed(0, 178) and IsControlPressed(0, 51) then -- Check if E is held while HOME is pressed
-        if _G.NexusGuard and _G.NexusGuard.ReportCheat then
-            _G.NexusGuard:ReportCheat(DetectorName, "Potential mod menu key combination detected (HOME + E)")
+    -- Example: HOME key (178) + E key (51) - Note: Control IDs might vary, use names for clarity if possible
+    -- Using 213 for INPUT_FRONTEND_SOCIAL_CLUB (HOME) and 38 for INPUT_PICKUP (E)
+    if IsControlJustPressed(0, 213) and IsControlPressed(0, 38) then -- Check if E is held while HOME is pressed
+        if NexusGuard and NexusGuard.ReportCheat then
+            local details = { keyCombo = "HOME + E", control1 = 213, control2 = 38 }
+            NexusGuard:ReportCheat(DetectorName, details)
         else
-            print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation: Potential mod menu key combination detected (HOME + E) (NexusGuard global unavailable)")
+            print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation: Potential mod menu key combination detected (HOME + E) (NexusGuard instance unavailable)")
         end
         return -- Report once per combination press
     end
 
-    -- Example: F5 key (commonly used)
-    if IsControlJustPressed(0, 166) then -- INPUT_REPLAY_START_STOP_RECORDING (F5)
-         if _G.NexusGuard and _G.NexusGuard.ReportCheat then
-            _G.NexusGuard:ReportCheat(DetectorName, "Potential mod menu key combination detected (F5)")
+    -- Example: F5 key (commonly used) - INPUT_FRONTEND_PAUSE_ALTERNATE (244)
+    if IsControlJustPressed(0, 244) then
+         if NexusGuard and NexusGuard.ReportCheat then
+            local details = { keyCombo = "F5", control1 = 244 }
+            NexusGuard:ReportCheat(DetectorName, details)
         else
-            print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation: Potential mod menu key combination detected (F5) (NexusGuard global unavailable)")
+            print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation: Potential mod menu key combination detected (F5) (NexusGuard instance unavailable)")
         end
         return
     end
@@ -76,20 +90,12 @@ function Detector.GetStatus()
 end
 
 -- Register with the detector system
+-- NOTE: The registry now handles calling Initialize and Start based on config.
 Citizen.CreateThread(function()
-    -- Wait for NexusGuard and DetectorRegistry to initialize
-    while not _G.NexusGuard or not _G.DetectorRegistry do
+    -- Wait for DetectorRegistry to be available
+    while not _G.DetectorRegistry do
         Citizen.Wait(500)
     end
-
-    -- Initialize after registry is ready
-    Detector.Initialize()
     _G.DetectorRegistry.Register(DetectorName, Detector)
-
-    -- Auto-start if enabled in config
-    if Config and Config.Detectors and Config.Detectors[DetectorName] then
-         -- Small delay to ensure NexusGuard is fully ready
-         Citizen.Wait(100)
-        _G.DetectorRegistry.Start(DetectorName)
-    end
+    -- Initialization and starting is now handled by the registry calling the methods on the registered module
 end)

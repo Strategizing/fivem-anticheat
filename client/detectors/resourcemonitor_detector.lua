@@ -1,15 +1,26 @@
 local DetectorName = "resourceMonitor" -- Using camelCase to match client_main interval key
 local ConfigKey = "resourceInjection" -- Key used in Config.Detectors table
+local NexusGuard = nil -- Local variable to hold the NexusGuard instance
+
 local Detector = {
     active = false,
     interval = 15000, -- Default, will be overridden by config if available
     lastCheck = 0
 }
 
--- Initialize the detector (called once)
-function Detector.Initialize()
+-- Initialize the detector (called once by the registry)
+-- Receives the NexusGuard instance from the registry
+function Detector.Initialize(nexusGuardInstance)
+    if not nexusGuardInstance then
+        print("^1[NexusGuard:" .. DetectorName .. "] CRITICAL: Failed to receive NexusGuard instance during initialization.^7")
+        return false
+    end
+    NexusGuard = nexusGuardInstance -- Store the instance locally
+
     -- Update interval from global config if available
-    if Config and Config.Detectors and Config.Detectors[ConfigKey] and NexusGuard and NexusGuard.intervals and NexusGuard.intervals.resourceMonitor then
+    -- Access Config via the passed instance
+    local cfg = NexusGuard.Config
+    if cfg and cfg.Detectors and cfg.Detectors[ConfigKey] and NexusGuard.intervals and NexusGuard.intervals.resourceMonitor then
         Detector.interval = NexusGuard.intervals.resourceMonitor
     end
     print("^2[NexusGuard:" .. DetectorName .. "]^7 Initialized with interval: " .. Detector.interval .. "ms")
@@ -37,9 +48,9 @@ end
 
 -- Check for violations (Moved logic from client_main.lua)
 function Detector.Check()
-    -- Ensure NexusGuard global and security token are available before sending
-    if not _G.NexusGuard or not _G.NexusGuard.securityToken then
-        print("^3[NexusGuard:" .. DetectorName .. "]^7 Skipping check, NexusGuard or security token not ready.")
+    -- Ensure NexusGuard instance and security token are available before sending
+    if not NexusGuard or not NexusGuard.securityToken then
+        print("^3[NexusGuard:" .. DetectorName .. "]^7 Skipping check, NexusGuard instance or security token not ready.")
         return
     end
 
@@ -55,11 +66,14 @@ function Detector.Check()
     end
 
     -- Send the list to the server for verification against a whitelist/blacklist
-    -- The server-side event 'NexusGuard:VerifyResources' needs to implement the actual validation logic.
-    TriggerServerEvent("NexusGuard:VerifyResources", runningResources, _G.NexusGuard.securityToken)
+    -- Use EventRegistry to trigger the server event
+    if _G.EventRegistry then
+        _G.EventRegistry.TriggerServerEvent('SYSTEM_RESOURCE_CHECK', runningResources, NexusGuard.securityToken)
+    else
+        print("^1[NexusGuard:" .. DetectorName .. "] CRITICAL: _G.EventRegistry not found. Cannot send resource list to server.^7")
+    end
 
     -- Client-side doesn't typically "detect" injection directly, it reports the state for server validation.
-    -- No NexusGuard:ReportCheat call here unless a specific client-side indicator is found (which is rare/unreliable).
 end
 
 
@@ -73,21 +87,13 @@ function Detector.GetStatus()
 end
 
 -- Register with the detector system
+-- NOTE: The registry now handles calling Initialize and Start based on config.
 Citizen.CreateThread(function()
-    -- Wait for NexusGuard and DetectorRegistry to initialize
-    while not _G.NexusGuard or not _G.DetectorRegistry do
+    -- Wait for DetectorRegistry to be available
+    while not _G.DetectorRegistry do
         Citizen.Wait(500)
     end
-
-    -- Initialize after registry is ready
-    Detector.Initialize()
-    -- Use the ConfigKey ('resourceInjection') for registration and checking if enabled
-    _G.DetectorRegistry.Register(ConfigKey, Detector) -- Register using the key from Config
-
-    -- Auto-start if enabled in config using the ConfigKey
-    if Config and Config.Detectors and Config.Detectors[ConfigKey] then
-         -- Small delay to ensure NexusGuard is fully ready
-         Citizen.Wait(100)
-        _G.DetectorRegistry.Start(ConfigKey) -- Start using the key from Config
-    end
+    -- Use the ConfigKey ('resourceInjection') for registration
+    _G.DetectorRegistry.Register(ConfigKey, Detector)
+    -- Initialization and starting is now handled by the registry calling the methods on the registered module
 end)

@@ -1,4 +1,6 @@
 local DetectorName = "weaponModification" -- Match the key in Config.Detectors
+local NexusGuard = nil -- Local variable to hold the NexusGuard instance
+
 local Detector = {
     active = false,
     interval = 3000, -- Default, will be overridden by config if available
@@ -8,10 +10,19 @@ local Detector = {
     }
 }
 
--- Initialize the detector (called once)
-function Detector.Initialize()
+-- Initialize the detector (called once by the registry)
+-- Receives the NexusGuard instance from the registry
+function Detector.Initialize(nexusGuardInstance)
+    if not nexusGuardInstance then
+        print("^1[NexusGuard:" .. DetectorName .. "] CRITICAL: Failed to receive NexusGuard instance during initialization.^7")
+        return false
+    end
+    NexusGuard = nexusGuardInstance -- Store the instance locally
+
     -- Update interval from global config if available
-    if Config and Config.Detectors and Config.Detectors.weaponModification and NexusGuard and NexusGuard.intervals and NexusGuard.intervals.weaponModification then
+    -- Access Config via the passed instance
+    local cfg = NexusGuard.Config
+    if cfg and cfg.Detectors and cfg.Detectors.weaponModification and NexusGuard.intervals and NexusGuard.intervals.weaponModification then
         Detector.interval = NexusGuard.intervals.weaponModification
     end
     print("^2[NexusGuard:" .. DetectorName .. "]^7 Initialized with interval: " .. Detector.interval .. "ms")
@@ -40,7 +51,9 @@ end
 -- Check for violations (Moved logic from client_main.lua)
 function Detector.Check()
     -- Cache config values locally
-    local damageThresholdMultiplier = (Config and Config.Thresholds and Config.Thresholds.weaponDamageMultiplier) or 1.5
+    -- Access Config via the stored NexusGuard instance
+    local cfg = NexusGuard.Config
+    local damageThresholdMultiplier = (cfg and cfg.Thresholds and cfg.Thresholds.weaponDamageMultiplier) or 1.5
     local clipSizeThresholdMultiplier = 2.0 -- Example: Allow double clip size, make configurable if needed
 
     local ped = PlayerPedId()
@@ -96,10 +109,11 @@ function Detector.Check()
                 baselineValue = storedStats.baseDamage,
                 clientThreshold = damageThresholdMultiplier
             }
-            if _G.NexusGuard and _G.NexusGuard.ReportCheat then
-                _G.NexusGuard:ReportCheat(DetectorName, details)
+            -- Use the stored NexusGuard instance to report
+            if NexusGuard and NexusGuard.ReportCheat then
+                NexusGuard:ReportCheat(DetectorName, details)
             else
-                print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation (Damage): " .. json.encode(details) .. " (NexusGuard global unavailable)")
+                print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation (Damage): " .. json.encode(details) .. " (NexusGuard instance unavailable)")
             end
         end
 
@@ -112,11 +126,13 @@ function Detector.Check()
                 baselineValue = storedStats.baseClipSize,
                 clientThreshold = clipSizeThresholdMultiplier
             }
-             if _G.NexusGuard and _G.NexusGuard.ReportCheat then
-                _G.NexusGuard:ReportCheat(DetectorName, details)
-            else
-                print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation (Clip Size): " .. json.encode(details) .. " (NexusGuard global unavailable)")
-            end
+             -- Use the stored NexusGuard instance to report
+             -- NOTE: As per Prompt 24, client-side reporting for clip size is removed. Server-side validation should handle this if implemented.
+             -- if NexusGuard and NexusGuard.ReportCheat then
+             --    NexusGuard:ReportCheat(DetectorName, details)
+             -- else
+             --    print("^1[NexusGuard:" .. DetectorName .. "]^7 Violation (Clip Size): " .. json.encode(details) .. " (NexusGuard instance unavailable)")
+             -- end
         end
     end
 end
@@ -132,20 +148,12 @@ function Detector.GetStatus()
 end
 
 -- Register with the detector system
+-- NOTE: The registry now handles calling Initialize and Start based on config.
 Citizen.CreateThread(function()
-    -- Wait for NexusGuard and DetectorRegistry to initialize
-    while not _G.NexusGuard or not _G.DetectorRegistry do
+    -- Wait for DetectorRegistry to be available
+    while not _G.DetectorRegistry do
         Citizen.Wait(500)
     end
-
-    -- Initialize after registry is ready
-    Detector.Initialize()
     _G.DetectorRegistry.Register(DetectorName, Detector)
-
-    -- Auto-start if enabled in config
-    if Config and Config.Detectors and Config.Detectors[DetectorName] then
-         -- Small delay to ensure NexusGuard is fully ready
-         Citizen.Wait(100)
-        _G.DetectorRegistry.Start(DetectorName)
-    end
+    -- Initialization and starting is now handled by the registry calling the methods on the registered module
 end)
