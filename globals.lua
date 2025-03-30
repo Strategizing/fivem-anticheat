@@ -23,7 +23,10 @@ local BanCache = {}
 local BanCacheExpiry = 0 -- Timestamp when cache expires
 local BanCacheDuration = 300 -- Cache duration in seconds (5 minutes)
 
--- Database Initialization
+-- Initialize PlayerMetrics globally if it doesn't exist
+_G.PlayerMetrics = _G.PlayerMetrics or {}
+
+-- Database Initialization (Uses oxmysql)
 function InitializeDatabase()
     if not Config or not Config.Database or not Config.Database.enabled then
         Log("Database integration disabled in config.", 2)
@@ -36,9 +39,10 @@ function InitializeDatabase()
     end
 
     Log("Initializing database schema...", 2)
-    local schemaFile = LoadResourceFile(GetCurrentResourceName(), "sql/schema.sql")
-    if not schemaFile then
-        Log("^1Error: Could not load sql/schema.sql file.^7", 1)
+    -- Ensure LoadResourceFile is available (should be standard)
+    local successLoad, schemaFile = pcall(LoadResourceFile, GetCurrentResourceName(), "sql/schema.sql")
+    if not successLoad or not schemaFile then
+        Log("^1Error: Could not load sql/schema.sql file. Error: " .. tostring(schemaFile) .. "^7", 1)
         return
     end
 
@@ -59,18 +63,22 @@ function InitializeDatabase()
             LoadBanList(true) -- Force load ban list after schema setup
             return
         end
-        MySQL.Async.execute(statements[index], {}, function(affectedRows)
-            -- Log("Executed schema statement " .. index, 4)
-            executeNext(index + 1) -- Execute next statement regardless of success/failure
-        end)
+        -- Wrap DB call in pcall
+        local success, err = pcall(MySQL.Async.execute, statements[index], {})
+        if not success then
+            Log(string.format("^1Error executing schema statement %d: %s^7", index, tostring(err)), 1)
+        end
+        -- Execute next statement regardless of individual success/failure
+        executeNext(index + 1)
     end
 
-    executeNext(1)
+    executeNext(1) -- Start execution
 end
 
 -- Ban list related functions (Database Driven)
 function LoadBanList(forceReload)
     if not Config or not Config.Database or not Config.Database.enabled then return end
+    if not MySQL then return end -- DB not available
 
     local currentTime = os.time()
     if not forceReload and BanCacheExpiry > currentTime then
@@ -79,36 +87,40 @@ function LoadBanList(forceReload)
     end
 
     Log("Loading ban list from database...", 2)
-    MySQL.Async.fetchAll('SELECT * FROM nexusguard_bans WHERE expire_date IS NULL OR expire_date > NOW()', {}, function(bans)
-        if bans then
-            BanCache = bans
-            BanCacheExpiry = currentTime + BanCacheDuration
-            Log("Loaded " .. #BanCache .. " active bans from database.", 2)
-        else
-            Log("^1Error loading bans from database.^7", 1)
-            BanCache = {} -- Clear cache on error
-            BanCacheExpiry = 0
-        end
-    end)
+    -- Wrap DB call in pcall
+    local success, bans = pcall(MySQL.Async.fetchAll, 'SELECT * FROM nexusguard_bans WHERE expire_date IS NULL OR expire_date > NOW()', {})
+
+    if success and type(bans) == "table" then
+        BanCache = bans
+        BanCacheExpiry = currentTime + BanCacheDuration
+        Log("Loaded " .. #BanCache .. " active bans from database.", 2)
+    elseif not success then
+        Log(string.format("^1Error loading bans from database: %s^7", tostring(bans)), 1) -- 'bans' holds error message on pcall failure
+        BanCache = {} -- Clear cache on error
+        BanCacheExpiry = 0
+    else
+        -- Query succeeded but returned nil/unexpected result
+        Log("^1Warning: Received unexpected result while loading bans from database.^7", 1)
+        BanCache = {} -- Clear cache
+        BanCacheExpiry = 0
+    end
 end
 
 -- Checks the ban cache
 function IsPlayerBanned(license, ip, discordId)
-    if not Config or not Config.Database or not Config.Database.enabled then
-        -- If DB disabled, maybe fall back to a simple file check? For now, assume not banned.
-        return false, nil
+    -- Always check cache even if DB is disabled (might have been loaded previously)
+    -- Trigger reload if cache expired (non-blocking, only if DB enabled)
+    if Config and Config.Database and Config.Database.enabled and BanCacheExpiry <= os.time() then
+        LoadBanList(false) -- Request reload, but don't block
     end
 
-    -- Trigger reload if cache expired (non-blocking)
-    if BanCacheExpiry <= os.time() then
-        LoadBanList(false)
-    end
-
+    -- Check the current cache regardless of expiry status
     for _, ban in ipairs(BanCache) do
         local identifiersMatch = false
-        if license and ban.license == license then identifiersMatch = true end
-        if ip and ban.ip == ip then identifiersMatch = true end
-        if discordId and ban.discord == discordId then identifiersMatch = true end
+        -- Ensure ban record has the necessary fields before comparing
+        if license and ban.license and ban.license == license then identifiersMatch = true end
+        if ip and ban.ip and ban.ip == ip then identifiersMatch = true end
+        if discordId and ban.discord and ban.discord == discordId then identifiersMatch = true end
 
         if identifiersMatch then
             return true, ban.reason or "No reason specified"
@@ -120,9 +132,16 @@ end
 -- Stores ban in the database
 -- @param banData Table containing ban details (name, reason, license, ip, discord, admin, durationSeconds)
 function StorePlayerBan(banData)
-    if not Config or not Config.Database or not Config.Database.enabled then return end
+    if not Config or not Config.Database or not Config.Database.enabled then
+        Log("Attempted to store ban while Database is disabled.", 3)
+        return
+    end
+    if not MySQL then
+        Log("^1Error: MySQL object not found. Cannot store ban.^7", 1)
+        return
+    end
     if not banData or not banData.license then
-        Log("^1Error: Cannot store ban without player license.^7", 1)
+        Log("^1Error: Cannot store ban without player license identifier.^7", 1)
         return
     end
 
@@ -131,7 +150,8 @@ function StorePlayerBan(banData)
         expireDate = os.date("!%Y-%m-%d %H:%M:%S", os.time() + banData.durationSeconds)
     end
 
-    MySQL.Async.execute(
+    -- Wrap DB call in pcall
+    local success, result = pcall(MySQL.Async.execute,
         'INSERT INTO nexusguard_bans (name, license, ip, discord, reason, admin, expire_date) VALUES (@name, @license, @ip, @discord, @reason, @admin, @expire_date)',
         {
             ['@name'] = banData.name,
@@ -141,16 +161,20 @@ function StorePlayerBan(banData)
             ['@reason'] = banData.reason,
             ['@admin'] = banData.admin or "NexusGuard System",
             ['@expire_date'] = expireDate
-        },
-        function(affectedRows)
-            if affectedRows > 0 then
-                Log("Ban for " .. banData.name .. " stored in database.", 2)
-                LoadBanList(true) -- Force reload ban cache
-            else
-                Log("^1Error storing ban for " .. banData.name .. " in database.^7", 1)
-            end
-        end
+        }
     )
+
+    if success then
+        -- Check affectedRows from the result if needed (result might be number of affected rows or nil)
+        if result and result > 0 then
+             Log("Ban for " .. banData.name .. " stored in database.", 2)
+             LoadBanList(true) -- Force reload ban cache
+        else
+             Log("^1Warning: Storing ban for " .. banData.name .. " reported 0 affected rows.^7", 1)
+        end
+    else
+        Log(string.format("^1Error storing ban for %s in database: %s^7", banData.name, tostring(result)), 1) -- 'result' holds error message
+    end
 end
 
 -- Bans a player and stores the ban
@@ -159,20 +183,30 @@ end
 -- @param adminName The name of the admin issuing the ban (optional, defaults to System).
 -- @param durationSeconds Duration of the ban in seconds (optional, permanent if nil).
 function BanPlayer(playerId, reason, adminName, durationSeconds)
-    local playerName = GetPlayerName(playerId)
-    if not playerName then
-        Log("^1Error: Cannot ban invalid player ID: " .. playerId .. "^7", 1)
+    local source = tonumber(playerId)
+    if not source or source <= 0 then
+        Log("^1Error: Invalid player ID provided to BanPlayer: " .. tostring(playerId) .. "^7", 1)
         return
     end
+    local playerName = GetPlayerName(source)
+    if not playerName then
+        Log("^1Error: Cannot ban player ID: " .. source .. " - Player not found.^7", 1)
+    end
 
-    local license = GetPlayerIdentifierByType(playerId, 'license')
-    local ip = GetPlayerEndpoint(playerId)
-    local discord = GetPlayerIdentifierByType(playerId, 'discord')
+    -- Fetch identifiers safely
+    local license = GetPlayerIdentifierByType(source, 'license')
+    local ip = GetPlayerEndpoint(source)
+    local discord = GetPlayerIdentifierByType(source, 'discord')
+
+    if not license then
+        Log("^1Warning: Could not get license identifier for player " .. source .. ". Ban might be less effective.^7", 1)
+        -- Decide if you want to proceed without a license? For now, we will.
+    end
 
     local banData = {
         name = playerName,
         license = license,
-        ip = string.gsub(ip or "", "ip:", ""), -- Remove ip: prefix if present
+        ip = ip and string.gsub(ip, "ip:", "") or nil, -- Remove ip: prefix if present, handle nil case
         discord = discord,
         reason = reason or "Banned by NexusGuard",
         admin = adminName or "NexusGuard System",
@@ -188,20 +222,23 @@ function BanPlayer(playerId, reason, adminName, durationSeconds)
         local durationText = FormatDuration(durationSeconds) -- Requires FormatDuration helper
         banMessage = banMessage .. " Duration: " .. durationText
     end
-    DropPlayer(playerId, banMessage)
+    DropPlayer(source, banMessage)
 
-    Log("^1Banned player: " .. playerName .. " (ID: " .. playerId .. ") Reason: " .. banData.reason .. "^7", 1)
+    Log("^1Banned player: " .. playerName .. " (ID: " .. source .. ") Reason: " .. banData.reason .. "^7", 1)
 
-    -- Send Discord notification
+    -- Send Discord notification (Check SendToDiscord exists)
     if _G.SendToDiscord then
+        local ipDisplay = banData.ip or "N/A"
+        local discordDisplay = banData.discord or "N/A"
+        local licenseDisplay = banData.license or "N/A"
         local discordMsg = string.format(
             "**Player Banned**\n**Name:** %s\n**License:** %s\n**IP:** %s\n**Discord:** %s\n**Reason:** %s\n**Admin:** %s",
-            playerName, license or "N/A", ip or "N/A", discord or "N/A", banData.reason, banData.admin
+            playerName, licenseDisplay, ipDisplay, discordDisplay, banData.reason, banData.admin
         )
         if durationSeconds and durationSeconds > 0 then
              discordMsg = discordMsg .. "\n**Duration:** " .. FormatDuration(durationSeconds)
         end
-         _G.SendToDiscord("Player Banned", discordMsg)
+         _G.SendToDiscord("Bans", discordMsg, Config.Discord.webhooks and Config.Discord.webhooks.bans) -- Use specific ban webhook if configured
     end
 end
 
@@ -229,6 +266,10 @@ function IsPlayerAdmin(playerId)
 
     -- Add framework-specific checks if needed (examples commented out)
     --[[
+        IMPLEMENTATION REQUIRED: Uncomment and adapt ONE of the following blocks
+        if you are using ESX or QBCore and want to check framework groups.
+        Ensure the export name is correct for your framework version.
+
         -- Example ESX:
         local ESX = exports['es_extended']:getSharedObject() -- Adjust export name if needed
         if ESX then
@@ -241,94 +282,117 @@ function IsPlayerAdmin(playerId)
         end
 
         -- Example QBCore:
+        -- Ensure the export name 'qb-core' and the path to player data/permissions are correct for your version.
         local QBCore = exports['qb-core']:GetCoreObject()
         if QBCore then
             local qbPlayer = QBCore.Functions.GetPlayer(player)
             if qbPlayer then
                  for _, group in ipairs(Config.AdminGroups) do
-                     -- Check QBCore job/gang groups or ACE perms depending on setup
-                     if qbPlayer.PlayerData.job.name == group and qbPlayer.PlayerData.job.isboss then return true end -- Example job check
-                     -- Or check qbPlayer.PlayerData.permission or similar based on your permission setup
+                     -- Option 1: Check QBCore permission system (Recommended if using qb-adminmenu or similar)
+                     -- if QBCore.Functions.HasPermission(player, group) then return true end
+
+                     -- Option 2: Check job/gang and grade/isboss (Adapt to your specific setup)
+                     -- if qbPlayer.PlayerData.job.name == group and qbPlayer.PlayerData.job.isboss then return true end
+                     -- if qbPlayer.PlayerData.gang.name == group and qbPlayer.PlayerData.gang.isboss then return true end
                  end
             end
         end
     ]]
 
+    -- Default: If no ACE permission or framework check matches, they are not considered admin by this function.
     return false
 end
 
 
 -- #############################################################################
--- ## CRITICAL SECURITY WARNING ##
--- The following security functions are INSECURE PLACEHOLDERS.
--- They offer minimal protection against determined attackers.
--- You MUST replace these with a robust, server-authoritative implementation
--- (e.g., using HMAC signing, proper session management) for real security.
--- #############################################################################
+-- ####################################################################################################
+-- ##                                                                                                ##
+-- ##   ███████╗ ███████╗  ██████╗ ██╗   ██╗ ███████╗ ██╗   ██╗ ███████╗ ██╗ ███████╗ ███╗   ███╗    ##
+-- ##   ██╔════╝ ██╔════╝ ██╔════╝ ██║   ██║ ██╔════╝ ██║   ██║ ██╔════╝ ██║ ██╔════╝ ████╗ ████║    ##
+-- ##   ███████╗ ███████╗ ██║  ███╗ ██║   ██║ ███████╗ ██║   ██║ ███████╗ ██║ ███████╗ ██╔████╔██║    ##
+-- ##   ╚════██║ ╚════██║ ██║   ██║ ██║   ██║ ╚════██║ ██║   ██║ ╚════██║ ██║ ╚════██║ ██║╚██╔╝██║    ##
+-- ##   ███████║ ███████║ ╚██████╔╝ ╚██████╔╝ ███████║ ╚██████╔╝ ███████║ ██║ ███████║ ██║ ╚═╝ ██║    ##
+-- ##   ╚══════╝ ╚══════╝  ╚═════╝   ╚═════╝  ╚══════╝  ╚═════╝  ╚══════╝ ╚═╝ ╚══════╝ ╚═╝     ╚═╝    ##
+-- ##                                                                                                ##
+-- ##   The following security functions (ValidateClientHash, GenerateSecurityToken,                 ##
+-- ##   ValidateSecurityToken, PseudoHmac) are **HIGHLY INSECURE PLACEHOLDERS/EXAMPLES**.            ##
+-- ##   They offer **ZERO REAL PROTECTION** against event spoofing or malicious actors.              ##
+-- ##                                                                                                ##
+-- ##   **DO NOT USE THESE IN A PRODUCTION ENVIRONMENT WITHOUT REPLACING THEM ENTIRELY**             ##
+-- ##   with a robust, server-authoritative implementation. Examples include:                        ##
+-- ##     - **HMAC-SHA256 Signing:** Use Config.SecuritySecret with a proper Lua crypto library      ##
+-- ##       (like lua-lockbox, lua-resty-hmac, or potentially built-in functions if using           ##
+-- ##       frameworks like ox_lib) to sign data sent between client and server. The server         ##
+-- ##       generates a signature, the client includes it, and the server verifies it upon receipt.  ##
+-- ##     - **Secure Session Tokens:** Generate cryptographically secure random tokens server-side,  ##
+-- ##       associate them with the player's session, send to the client, and require the client     ##
+-- ##       to send this token with sensitive events. Validate the token server-side.                ##
+-- ##     - **Framework Secure Events:** If your framework (e.g., newer ESX/QBCore versions)         ##
+-- ##       provides built-in mechanisms for secure events, leverage those instead.                  ##
+-- ##                                                                                                ##
+-- ##   Relying on these placeholders **WILL LEAVE YOUR SERVER EXTREMELY VULNERABLE** to event       ##
+-- ##   spoofing, allowing cheaters to trigger bans/kicks on others or bypass detections.            ##
+-- ##   You **MUST** implement proper security measures yourself.                                    ##
+-- ##                                                                                                ##
+-- ####################################################################################################
 
--- Placeholder: Client hash validation - Generally considered ineffective.
--- @param hash The client-provided hash string.
--- @return boolean Always returns true in this placeholder implementation after basic checks.
+-- Placeholder: Client hash validation - **INEFFECTIVE AND SHOULD NOT BE RELIED UPON.**
+-- A client can easily send any hash they want. This provides no real security.
 function ValidateClientHash(hash)
-    -- Log("^1SECURITY WARNING: Client hash validation is generally ineffective and easily bypassed.^7", 1)
-    -- Consider removing this check entirely.
-    return hash and type(hash) == "string" and string.len(hash) > 10
+    Log("^1SECURITY RISK: Using ineffective ValidateClientHash placeholder. This check is easily bypassed.^7", 1)
+    return hash and type(hash) == "string" and string.len(hash) > 10 -- Basic format check only
 end
 
--- Basic pseudo-HMAC function (NOT CRYPTOGRAPHICALLY SECURE)
--- Uses simple string hashing as a stand-in for real HMAC-SHA256
+-- Basic pseudo-HMAC function (**EXAMPLE ONLY - NOT CRYPTOGRAPHICALLY SECURE**)
+-- This is **NOT** a real HMAC and provides **NO** security guarantees. Replace with proper crypto.
 local function PseudoHmac(key, message)
-    -- Very basic hashing - replace with real crypto if possible
+    Log("^1SECURITY RISK: Using insecure PseudoHmac function. Replace with proper crypto (e.g., HMAC-SHA256). This offers NO real security.^7", 1)
     local hash = 0
-    for i = 1, string.len(message) do
-        hash = (hash * 31 + string.byte(message, i)) % 1000000007
-    end
-    for i = 1, string.len(key) do
-        hash = (hash * 31 + string.byte(key, i)) % 1000000007
-    end
+    -- Simple hashing, easily predictable/breakable
+    for i = 1, string.len(message) do hash = (hash * 31 + string.byte(message, i)) % 1000000007 end
+    for i = 1, string.len(key) do hash = (hash * 31 + string.byte(key, i)) % 1000000007 end
     return tostring(hash)
 end
 
--- Generates a time-based token using pseudo-HMAC
--- @param playerId The server ID of the player requesting a token.
--- @return string A token string containing timestamp and hash, or nil on error.
+-- Generates a time-based token using the **INSECURE** pseudo-HMAC example.
+-- **THIS IS NOT SECURE. REPLACE THIS FUNCTION.**
 function GenerateSecurityToken(playerId)
+    Log("^1SECURITY RISK: Using insecure placeholder GenerateSecurityToken. Replace immediately.^7", 1)
     if not Config or not Config.SecuritySecret or Config.SecuritySecret == "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" then
-        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot generate secure token.^7", 1)
+        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot generate placeholder token.^7", 1)
         return nil
     end
     local timestamp = os.time()
     local message = tostring(playerId) .. ":" .. tostring(timestamp)
-    local hash = PseudoHmac(Config.SecuritySecret, message)
+    local hash = PseudoHmac(Config.SecuritySecret, message) -- Uses insecure hash
     local token = message .. ":" .. hash
 
-    -- Store the generated token's timestamp for validation window
+    -- Store the generated token's timestamp for validation window (part of the insecure mechanism)
     if _G.PlayerMetrics and _G.PlayerMetrics[playerId] then
         _G.PlayerMetrics[playerId].lastTokenTime = timestamp
     end
-    -- Log("Generated token for " .. playerId .. ": " .. token, 4) -- Debugging only
     return token
 end
 
--- Validates a time-based token using pseudo-HMAC
--- @param playerId The server ID of the player sending the token.
--- @param token The token string sent by the client.
--- @return boolean True if the token is valid and within the time window, false otherwise.
+-- Validates a time-based token using the **INSECURE** pseudo-HMAC example.
+-- **THIS IS NOT SECURE. REPLACE THIS FUNCTION.**
 function ValidateSecurityToken(playerId, token)
+    Log("^1SECURITY RISK: Using insecure placeholder ValidateSecurityToken. Replace immediately.^7", 1)
     if not Config or not Config.SecuritySecret or Config.SecuritySecret == "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" then
-        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot validate token.^7", 1)
+        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot validate placeholder token.^7", 1)
         return false
     end
-    if not token or type(token) ~= "string" then return false end
+    if not token or type(token) ~= "string" then
+        Log("^1Invalid token type received from " .. playerId .. "^7", 1)
+        return false
+    end
 
     -- Split token into parts: playerID:timestamp:hash
     local parts = {}
-    for part in string.gmatch(token, "[^:]+") do
-        table.insert(parts, part)
-    end
+    for part in string.gmatch(token, "[^:]+") do table.insert(parts, part) end
 
     if #parts ~= 3 then
-        Log("^1Invalid token format received from " .. playerId .. "^7", 1)
+        Log("^1Invalid token format received from " .. playerId .. " ('" .. token .. "')^7", 1)
         return false
     end
 
@@ -338,35 +402,34 @@ function ValidateSecurityToken(playerId, token)
 
     -- Basic validation
     if not receivedPlayerId or receivedPlayerId ~= playerId or not receivedTimestamp or not receivedHash then
-        Log("^1Invalid token content received from " .. playerId .. "^7", 1)
+        Log("^1Invalid token content received from " .. playerId .. " (PlayerID mismatch or missing parts)^7", 1)
         return false
     end
 
-    -- Check timestamp window (e.g., +/- 60 seconds)
+    -- Check timestamp window (e.g., +/- 60 seconds) - This is easily bypassed if attacker controls timestamp
     local currentTime = os.time()
     local timeDifference = math.abs(currentTime - receivedTimestamp)
-    local maxTimeDifference = 60 -- Allow 1 minute difference
+    local maxTimeDifference = 60 -- Allow 1 minute difference (adjust as needed, but doesn't fix underlying insecurity)
     if timeDifference > maxTimeDifference then
-        Log("^1Token timestamp mismatch for " .. playerId .. ". Diff: " .. timeDifference .. "s^7", 1)
+        Log("^1Token timestamp mismatch for " .. playerId .. ". Diff: " .. timeDifference .. "s (Current: " .. currentTime .. ", Received: " .. receivedTimestamp .. ")^7", 1)
         return false
     end
 
-    -- Regenerate the expected hash
+    -- Regenerate the expected hash using the insecure function
     local message = tostring(playerId) .. ":" .. tostring(receivedTimestamp)
-    local expectedHash = PseudoHmac(Config.SecuritySecret, message)
+    local expectedHash = PseudoHmac(Config.SecuritySecret, message) -- Uses insecure hash
 
     -- Compare hashes
     if expectedHash == receivedHash then
-        -- Log("Token validated successfully for " .. playerId, 4) -- Debugging only
-        return true
+        return true -- Token appears valid according to the *insecure* method
     else
-        Log("^1Token hash mismatch for " .. playerId .. "^7", 1)
+        Log("^1Token hash mismatch for " .. playerId .. ". Expected: " .. expectedHash .. ", Received: " .. receivedHash .. "^7", 1)
         return false
     end
 end
 
 -- #############################################################################
--- ## END SECURITY WARNING ##
+-- ## END SECURITY WARNING BLOCK ##
 -- #############################################################################
 
 
@@ -429,11 +492,20 @@ end
 
 -- Stores a detection event in the database
 function StoreDetection(playerId, detectionType, detectionData)
-    if not Config or not Config.Database or not Config.Database.enabled or not Config.Database.storeDetectionHistory then return end
-    if not MySQL then return end -- DB not available
-    if not playerId or not detectionType then return end
+    if not Config or not Config.Database or not Config.Database.enabled or not Config.Database.storeDetectionHistory then
+        -- Log("Database storage for detections disabled.", 4)
+        return
+    end
+    if not MySQL then
+        Log("^1Error: MySQL object not found. Cannot store detection.^7", 1)
+        return
+    end
+    if not playerId or playerId <= 0 or not detectionType then
+        Log("^1Error: Invalid player ID or detection type provided to StoreDetection.^7", 1)
+        return
+    end
 
-    local playerName = GetPlayerName(playerId) or "Unknown"
+    local playerName = GetPlayerName(playerId) or "Unknown (" .. playerId .. ")"
     local license = GetPlayerIdentifierByType(playerId, 'license')
     local ip = GetPlayerEndpoint(playerId)
 
@@ -451,23 +523,25 @@ function StoreDetection(playerId, detectionType, detectionData)
         Log("^1Warning: Failed to encode detectionData for storage. Storing empty JSON. Error: " .. tostring(result) .. "^7", 1)
     end
 
-    MySQL.Async.execute(
+    -- Wrap DB call in pcall
+    local success, dbResult = pcall(MySQL.Async.execute,
         'INSERT INTO nexusguard_detections (player_name, player_license, player_ip, detection_type, detection_data) VALUES (@name, @license, @ip, @type, @data)',
         {
             ['@name'] = playerName,
             ['@license'] = license,
-            ['@ip'] = string.gsub(ip or "", "ip:", ""), -- Remove ip: prefix
+            ['@ip'] = ip and string.gsub(ip, "ip:", "") or nil, -- Remove ip: prefix, handle nil
             ['@type'] = detectionType,
             ['@data'] = dataJson
-        },
-        function(affectedRows)
-            if affectedRows <= 0 then
-                Log("^1Error storing detection event for player " .. playerId .. "^7", 1)
-            -- else
-                -- Log("Stored detection event: " .. detectionType .. " for player " .. playerId, 4) -- Optional debug log
-            end
-        end
+        }
     )
+
+    if not success then
+         Log(string.format("^1Error storing detection event for player %s: %s^7", playerId, tostring(dbResult)), 1)
+    elseif dbResult and dbResult <= 0 then
+         Log("^1Warning: Storing detection event for player " .. playerId .. " reported 0 affected rows.^7", 1)
+    -- else
+         -- Log("Stored detection event: " .. detectionType .. " for player " .. playerId, 4) -- Optional debug log
+    end
 end
 _G.StoreDetection = StoreDetection -- Expose globally
 
@@ -539,12 +613,16 @@ end
 
 -- Event handling functions (Example implementations)
 function HandleExplosionEvent(sender, ev)
+    local source = tonumber(sender)
     -- Ensure sender and metrics exist
-    if not sender or sender <= 0 or not _G.PlayerMetrics or not _G.PlayerMetrics[sender] then return end
-    -- Ensure event data is valid
-    if not ev or not ev.explosionType then return end
+    if not source or source <= 0 or not _G.PlayerMetrics or not _G.PlayerMetrics[source] then return end
+    -- Ensure event data is valid (check required fields)
+    if not ev or ev.explosionType == nil or ev.posX == nil or ev.posY == nil or ev.posZ == nil then
+        Log("^1Warning: Received incomplete explosionEvent data from " .. source .. "^7", 1)
+        return
+    end
 
-    local metrics = _G.PlayerMetrics[sender]
+    local metrics = _G.PlayerMetrics[source]
     local explosionType = ev.explosionType
     local position = vector3(ev.posX or 0, ev.posY or 0, ev.posZ or 0)
 
@@ -568,9 +646,9 @@ function HandleExplosionEvent(sender, ev)
     if recentCount > 5 then
         -- Ensure ProcessDetection is available globally
         if _G.ProcessDetection then
-            _G.ProcessDetection(sender, "explosionspam", { count = recentCount, period = "10s" })
+            _G.ProcessDetection(source, "explosionspam", { count = recentCount, period = "10s" })
         else
-            Log("^1Error: ProcessDetection function not found!^7", 1)
+            Log("^1Error: _G.ProcessDetection function not found! Cannot report explosion spam.^7", 1)
         end
     end
 end
@@ -587,10 +665,14 @@ function HandleEntityCreation(entity)
         local entityType = GetEntityType(entity)
         local model = GetEntityModel(entity)
         -- Check if model is blacklisted or type is suspicious
-        if IsModelBlacklisted(model) then
+        if IsModelBlacklisted(model) then -- Requires IsModelBlacklisted function
              local owner = NetworkGetEntityOwner(entity)
              if owner > 0 then
-                 ProcessDetection(owner, "blacklistedentity", { model = model })
+                 if _G.ProcessDetection then
+                     _G.ProcessDetection(owner, "blacklistedentity", { model = model })
+                 else
+                     Log("^1Error: ProcessDetection function not found!^7", 1)
+                 end
              end
         end
         -- Add spam checks similar to HandleExplosionEvent if needed
@@ -612,79 +694,122 @@ end
 -- Deletes old detection records from the database
 function CleanupDetectionHistory()
     if not Config or not Config.Database or not Config.Database.enabled or not Config.Database.historyDuration or Config.Database.historyDuration <= 0 then
-        return -- Disabled or invalid duration
+        -- Log("Detection history cleanup disabled or duration not set.", 4)
+        return
     end
-    if not MySQL then return end -- DB not available
+    if not MySQL then
+        Log("^1Error: MySQL object not found. Cannot cleanup detection history.^7", 1)
+        return
+    end
 
     local historyDays = Config.Database.historyDuration
-    Log("Cleaning up detection history older than " .. historyDays .. " days...", 3)
+    Log("Cleaning up detection history older than " .. historyDays .. " days...", 2)
 
-    MySQL.Async.execute(
+    -- Wrap DB call in pcall
+    local success, result = pcall(MySQL.Async.execute,
         'DELETE FROM nexusguard_detections WHERE timestamp < DATE_SUB(NOW(), INTERVAL @days DAY)',
-        { ['@days'] = historyDays },
-        function(affectedRows)
-            if affectedRows > 0 then
-                Log("Cleaned up " .. affectedRows .. " old detection records.", 2)
-            else
-                -- Log("No old detection records found to clean up.", 4)
-            end
-        end
+        { ['@days'] = historyDays }
     )
+
+    if success then
+        if result and result > 0 then
+            Log("Cleaned up " .. result .. " old detection records.", 2)
+        -- else
+            -- Log("No old detection records found to clean up.", 4)
+        end
+    else
+        Log(string.format("^1Error cleaning up detection history: %s^7", tostring(result)), 1)
+    end
 end
 
 -- Saves player session summary to the database on disconnect
 -- @param playerId Server ID of the player whose metrics should be saved.
 function SavePlayerMetrics(playerId)
-    if not Config or not Config.Database or not Config.Database.enabled then return end
-    if not _G.PlayerMetrics or not _G.PlayerMetrics[playerId] then return end
-    if not MySQL then return end -- DB not available
-
-    local metrics = _G.PlayerMetrics[playerId]
-    local playerName = GetPlayerName(playerId) or "Unknown"
-    local license = GetPlayerIdentifierByType(playerId, 'license')
-    if not license then
-        Log("^1Warning: Cannot save metrics for player " .. playerId .. " without license identifier.^7", 1)
+    local source = tonumber(playerId)
+    if not source or source <= 0 then
+        Log("^1Error: Invalid player ID provided to SavePlayerMetrics: " .. tostring(playerId) .. "^7", 1)
         return
     end
 
-    local connectTime = metrics.connectTime or os.time() -- Fallback if connectTime wasn't set
-    local playTime = os.time() - connectTime
-    local finalTrustScore = metrics.trustScore or 100.0
+    if not Config or not Config.Database or not Config.Database.enabled then
+        -- Log("Database saving for session metrics disabled.", 4)
+        return
+    end
+    if not _G.PlayerMetrics or not _G.PlayerMetrics[source] then
+        Log("^1Warning: PlayerMetrics not found for player " .. source .. " on disconnect. Cannot save session.^7", 1)
+        return
+    end
+     if not MySQL then
+        Log("^1Error: MySQL object not found. Cannot save session metrics for player " .. source .. ".^7", 1)
+        return
+    end
+
+    local metrics = _G.PlayerMetrics[source]
+    local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
+    local license = GetPlayerIdentifierByType(source, 'license')
+    if not license then
+        Log("^1Warning: Cannot save metrics for player " .. source .. " without license identifier. Skipping save.^7", 1)
+    end
+
+    local connectTime = metrics.connectTime or os.time() -- Fallback if connectTime wasn't set properly
+    local playTime = math.max(0, os.time() - connectTime) -- Ensure playtime isn't negative
+    local finalTrustScore = metrics.trustScore or 100.0 -- Default to 100 if missing
     local totalDetections = #(metrics.detections or {})
     local totalWarnings = metrics.warningCount or 0 -- Assuming warningCount is tracked
 
     Log("Saving session metrics for player " .. playerId .. " (" .. playerName .. ")", 3)
 
-    MySQL.Async.execute(
+    -- Wrap DB call in pcall
+    local success, result = pcall(MySQL.Async.execute,
         'INSERT INTO nexusguard_sessions (player_name, player_license, connect_time, play_time_seconds, final_trust_score, total_detections, total_warnings) VALUES (@name, @license, FROM_UNIXTIME(@connect), @playtime, @trust, @detections, @warnings)',
         {
             ['@name'] = playerName,
             ['@license'] = license,
-            ['@connect'] = connectTime,
+            ['@connect'] = connectTime, -- Store as UNIX timestamp
             ['@playtime'] = playTime,
             ['@trust'] = finalTrustScore,
             ['@detections'] = totalDetections,
             ['@warnings'] = totalWarnings
-        },
-        function(affectedRows)
-            if affectedRows > 0 then
-                Log("Session metrics saved for player " .. playerId, 3)
-            else
-                Log("^1Error saving session metrics for player " .. playerId .. "^7", 1)
-            end
-        end
+        }
     )
+
+    if success then
+        if result and result > 0 then
+            Log("Session metrics saved for player " .. source, 3)
+        else
+            Log("^1Warning: Saving session metrics for player " .. source .. " reported 0 affected rows.^7", 1)
+        end
+    else
+        Log(string.format("^1Error saving session metrics for player %s: %s^7", source, tostring(result)), 1)
+    end
 end
 
 
 -- Discord related functions
-function SendToDiscord(title, message)
-    -- Check if logging and webhook URL are enabled/set
-    if not Config or not Config.EnableDiscordLogs or not Config.DiscordWebhook or Config.DiscordWebhook == "" then
-        return
+-- @param category Optional category to determine webhook URL (e.g., "bans", "kicks", "general")
+-- @param specificWebhook Optional direct webhook URL to override config lookup
+function SendToDiscord(category, title, message, specificWebhook)
+    -- Check if Discord integration is enabled at all
+    if not Config or not Config.Discord or not Config.Discord.enabled then return end
+
+    -- Determine the webhook URL
+    local webhookURL = specificWebhook -- Use specific URL if provided
+    if not webhookURL then
+        if Config.Discord.webhooks and category and Config.Discord.webhooks[category] and Config.Discord.webhooks[category] ~= "" then
+            webhookURL = Config.Discord.webhooks[category]
+        elseif Config.DiscordWebhook and Config.DiscordWebhook ~= "" then
+            webhookURL = Config.DiscordWebhook -- Fallback to general webhook
+        else
+            -- Log("Discord webhook not configured for category '" .. (category or "general") .. "' and no general webhook set.", 3)
+            return -- No valid webhook URL found
+        end
     end
 
-    local webhookURL = Config.DiscordWebhook
+    -- Check if PerformHttpRequest is available
+    if not PerformHttpRequest then
+        Log("^1Error: PerformHttpRequest native not available. Cannot send Discord message.^7", 1)
+        return
+    end
     local embed = {
         {
             ["color"] = 16711680, -- Red
@@ -708,14 +833,18 @@ function SendToDiscord(title, message)
         return
     end
 
-    -- Perform the HTTP request asynchronously
-    PerformHttpRequest(webhookURL, function(err, text, headers)
-        if err then
-            Log("^1Error sending Discord webhook: " .. tostring(err) .. "^7", 1)
+    -- Perform the HTTP request asynchronously, wrapped in pcall
+    local success, err = pcall(PerformHttpRequest, webhookURL, function(errHttp, text, headers)
+        if errHttp then
+            Log("^1Error sending Discord webhook (Callback): " .. tostring(errHttp) .. "^7", 1)
         else
             Log("Discord notification sent: " .. title, 3)
         end
     end, 'POST', payload, { ['Content-Type'] = 'application/json' })
+
+    if not success then
+         Log("^1Error initiating Discord HTTP request: " .. tostring(err) .. "^7", 1)
+    end
 end
 
 

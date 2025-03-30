@@ -6,10 +6,15 @@ Config.EnableDiscordLogs = true -- Enable Discord webhook logs
 Config.DiscordWebhook = "" -- Your Discord webhook URL
 Config.BanMessage = "You have been banned for cheating. Appeal at: discord.gg/yourserver" -- Ban message
 Config.KickMessage = "You have been kicked for suspicious activity." -- Kick message
-Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups that can access admin commands
-Config.SecuritySecret = "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" -- Used for securing client-server communication (HMAC)
+Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups that can access admin commands (Used by placeholder IsPlayerAdmin function)
+-- !! CRITICAL !! Change this to a long, unique, random string for your server.
+-- This is used by the **INSECURE PLACEHOLDER** token generation/validation in globals.lua.
+-- A strong, unique secret is essential **AND YOU MUST REPLACE THE PLACEHOLDER FUNCTIONS**
+-- in globals.lua (GenerateSecurityToken, ValidateSecurityToken) with a secure implementation (e.g., HMAC-SHA256).
+-- **LEAVING THIS AS DEFAULT OR USING THE PLACEHOLDER FUNCTIONS WILL MAKE YOUR SERVER VULNERABLE.**
+Config.SecuritySecret = "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" -- <<< CHANGE THIS!!!
 
--- Auto Configuration
+-- Auto Configuration (Placeholder Features)
 Config.AutoConfig = {
     enabled = true, -- Enable auto-configuration during installation
     detectFramework = true, -- Auto-detect framework (ESX, QB, etc.)
@@ -71,27 +76,34 @@ Config.AI = {
 
 -- Optional Features
 Config.Features = {
-    adminPanel = true, -- Admin panel to review detections and manage bans
-    playerReports = true, -- Allow players to report suspicious activity
+    adminPanel = true, -- Placeholder: Requires a UI and server-side logic implementation
+    playerReports = true, -- Placeholder: Requires UI/command and server-side logic implementation
     resourceVerification = {
-        enabled = false, -- Verify integrity of client resources (EXPERIMENTAL - can cause false positives)
+        enabled = false, -- Verify integrity of client resources (EXPERIMENTAL - can cause false positives if not configured correctly)
         mode = "whitelist", -- "whitelist" or "blacklist"
-        whitelist = { -- List of allowed resource names (if mode is "whitelist")
+        -- Whitelist Mode: ONLY resources listed here are allowed. Add ALL essential FiveM, framework (ESX, QBCore), and core server resources.
+        whitelist = {
             "chat",
             "spawnmanager",
             "mapmanager",
-            "basic-gamemode",
-            "fivem",
-            "hardcap",
-            "rconlog",
-            "sessionmanager",
-            GetCurrentResourceName() -- Always allow the anti-cheat resource itself
-            -- Add essential framework resources (e.g., es_extended, qb-core) and core resources here
+            "basic-gamemode", -- Example core resource
+            "fivem",          -- Core resource
+            "hardcap",        -- Core resource
+            "rconlog",        -- Core resource
+            "sessionmanager", -- Core resource
+            GetCurrentResourceName(), -- Always allow the anti-cheat resource itself
+            -- !! VERY IMPORTANT !! If using whitelist mode, you MUST add ALL essential resources
+            -- for your server here. This includes your framework (e.g., 'es_extended', 'qb-core'),
+            -- maps, MLOs, core scripts (chat, spawnmanager, etc.), UI scripts, and any other
+            -- resource required for your server to function.
+            -- Failure to whitelist essential resources WILL cause players to be kicked/banned incorrectly.
+            -- Example: 'es_extended', 'qb-core', 'qb-inventory', 'ox_lib', 'ox_inventory', 'cd_drawtextui'
         },
-        blacklist = { -- List of disallowed resource names (if mode is "blacklist")
-            -- Add known cheat menu resource names here
-            "LambdaMenu",
-            "SimpleTrainer",
+        -- Blacklist Mode: Resources listed here are DISALLOWED. Useful for blocking known cheat menus.
+        blacklist = {
+            -- Add known cheat menu resource names here (case-sensitive)
+            "LambdaMenu",     -- Example
+            "SimpleTrainer",  -- Example
             "menyoo"
         },
         kickOnMismatch = true, -- Kick player if unauthorized resources are detected
@@ -115,7 +127,7 @@ Config.Database = {
 -- Screen Capture Settings
 Config.ScreenCapture = {
     enabled = true,
-    webhookURL = "", -- Discord webhook for screenshots
+    webhookURL = "", -- !! REQUIRED if enabled !! Discord webhook for screenshots
     quality = "medium", -- Screenshot quality (low, medium, high)
     includeWithReports = true, -- Include screenshots with admin reports
     automaticCapture = true, -- Take periodic screenshots of suspicious players
@@ -125,16 +137,16 @@ Config.ScreenCapture = {
 -- Discord Integration
 Config.Discord = {
     enabled = true,
-    botToken = "", -- Your Discord bot token
-    guildId = "", -- Your Discord server ID
+    botToken = "", -- !! REQUIRED for bot features (commands, etc.) - Requires separate bot implementation !! Your Discord bot token
+    guildId = "", -- !! REQUIRED for bot features !! Your Discord server ID
     botCommandPrefix = "!ac", -- Command prefix for Discord bot
     inviteLink = "discord.gg/yourserver", -- Discord invite link for players
-    
+
     richPresence = {
         enabled = true,
-        appId = "1234567890", -- Discord Application ID
-        largeImageKey = "logo", -- Large image key
-        smallImageKey = "shield", -- Small image key
+        appId = "1234567890", -- !! REQUIRED if enabled !! Discord Application ID (Create one at discord.com/developers/applications)
+        largeImageKey = "logo", -- Large image key (Must be uploaded to Discord App Assets)
+        smallImageKey = "shield", -- Small image key (Must be uploaded to Discord App Assets)
         updateInterval = 60, -- How often to update presence (seconds)
         showPlayerCount = true, -- Show current player count in status
         showServerName = true, -- Show server name in status
@@ -164,7 +176,7 @@ Config.Discord = {
         commands = {
             enabled = true,
             restrictToChannels = true, -- Restrict bot commands to specific channels
-            commandChannels = {"123456789"}, -- Channel IDs where commands are allowed
+            commandChannels = {"123456789"}, -- !! REQUIRED if restrictToChannels = true !! Channel IDs where commands are allowed
             available = {
                 "status", -- Get server status
                 "players", -- List online players
@@ -192,12 +204,12 @@ Config.Discord = {
             suspiciousActivity = true, -- Notify on suspicious activity
             serverStatus = true, -- Server status updates
             anticheatUpdates = true -- Anti-cheat update notifications
-        }
-        }, -- Added missing comma here
-        
+        } -- Closing brace for Config.Discord.bot.notifications
+        }, -- Closing brace for Config.Discord.bot
+
         webhooks = {
-            general = "", -- General anti-cheat logs
-            bans = "", -- Ban notifications
+            general = "", -- General anti-cheat logs (Can be the same as Config.DiscordWebhook)
+            bans = "", -- Ban notifications (Can be the same as Config.DiscordWebhook)
             kicks = "", -- Kick notifications
             warnings = "" -- Warning notifications
         } -- Closing brace for Config.Discord.webhooks

@@ -2,60 +2,49 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'Strategizing'
-description 'NexusGuard - Advanced AI-powered Anti-Cheat for FiveM'
-version '1.1.0'
+description 'NexusGuard - Modular Anti-Cheat Framework for FiveM'
+version '0.6.9' -- Reflecting framework version
 
-dependency {
-    'oxmysql',
-    'discord_perms'  -- Optional discord permissions integration
+--[[ Dependencies: Ensure these resources are started BEFORE NexusGuard ]]
+dependencies {
+    'oxmysql', -- Required for database features (bans, detections, sessions) and JSON library
+    'screenshot-basic' -- Required for screenshot functionality (Config.ScreenCapture.enabled)
+    -- 'chat', -- Optional: Required for default client-side warnings via exports.chat
+    -- Add framework dependencies if needed for IsPlayerAdmin checks (e.g., 'es_extended', 'qb-core')
 }
 
 shared_scripts {
     'config.lua',
-    'globals.lua',
-    -- 'shared/constants.lua', -- File missing
-    'shared/discord_config.lua',
+    'globals.lua', -- Contains helpers and PLACEHOLDERS requiring user implementation
     'shared/detector_registry.lua',
-    'shared/config_validator.lua',
     'shared/event_registry.lua',
     'shared/version_compat.lua'
+    -- NOTE: config_validator.lua, discord_config.lua, constants.lua are not used/present.
+    -- NOTE: load.lua is redundant and removed. Initialization happens in client_main/server_main.
 }
 
 client_scripts {
     'client_main.lua',
-    'client/detectors/*.lua',
-    -- 'client/networks/*.lua', -- Directory missing
-    -- 'client/ml/*.lua', -- Directory missing
-    -- 'client/hooks/*.lua', -- Directory missing
-    'client/discord/*.lua'
+    'client/detectors/*.lua' -- Loads all detector modules
 }
 
 server_scripts {
-    '@oxmysql/lib/MySQL.lua',
-    'server_main.lua',
-    -- 'server/api/*.lua', -- Directory missing
-    -- 'server/detectors/*.lua', -- Directory missing
-    -- 'server/ml/*.lua', -- Directory missing
-    -- 'server/webhooks/*.lua', -- Directory missing
-    'server/discord/bot.lua', -- Explicitly list existing file instead of wildcard
-    'server/discord/commands/*.lua',
-    -- 'server/discord/events/*.lua', -- Directory missing
-    -- 'server/db/*.lua', -- Directory missing
-    -- 'server/handlers/*.lua' -- Directory missing
+    -- '@oxmysql/lib/MySQL.lua', -- Not needed; dependency ensures MySQL is available globally or via exports['oxmysql']
+    'server_main.lua'
+    -- NOTE: Discord bot, API, server-side detectors, ML, webhooks, etc., are not implemented in this version.
 }
 
 files {
-    -- 'ml_models/*.json', -- Directory missing
-    -- 'discord_bot/config.json' -- Directory missing
+    'sql/schema.sql' -- Database schema file
+    -- Removed: ml_models, discord_bot/config.json (missing/unused)
 }
 
 lua54 'yes'
 
 provides {
-    'anticheat',
-    'discord_anticheat',
-    'discord_richpresence'
+    'anticheat' -- Indicate that this resource provides anticheat functionality
+    -- 'discord_richpresence' -- Rich presence is integrated into client_main, not a separate provided export
 }
 
--- Exclude development/debug tools from server resources
-server_ignore_resource_method 'tools'
+-- Optional: Exclude development/debug tools from being accessible via exports by other resources
+-- server_ignore_resource_method 'tools'

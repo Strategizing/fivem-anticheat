@@ -56,7 +56,7 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         RegisterNetEvent("NexusGuard:CheatWarning")
     else
         -- Fallback if EventRegistry hasn't loaded somehow (shouldn't happen with manifest order)
-        print("^1[NexusGuard] EventRegistry not found, using fallback event names.^7")
+        print("^1[NexusGuard] Warning: EventRegistry not found, using fallback event names. Ensure EventRegistry script is loaded correctly in shared_scripts.^7")
         RegisterNetEvent('NexusGuard:ReceiveSecurityToken')
         RegisterNetEvent('NexusGuard:CheatWarning')
         RegisterNetEvent('nexusguard:requestScreenshot')
@@ -202,23 +202,24 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
             -- Allow time for token receipt
             Citizen.Wait(2000)
 
-            -- Start auxiliary protection modules (like Rich Presence)
-            -- Detectors are started automatically via their registration block
-            self:StartProtectionModules()
+        -- Start auxiliary protection modules (like Rich Presence)
+        -- Detectors are started automatically via their registration block in detector_registry.lua
+        self:StartProtectionModules()
 
-            self.initialized = true
-            print('^2[NexusGuard]^7 Protection system initialized')
+        self.initialized = true
+        print('^2[NexusGuard]^7 Core protection system initialized')
         end)
     end
 
     --[[
         Protection Module Management
-        Initializes features like Rich Presence. Detectors are now self-managed.
+        Initializes features like Rich Presence. Detectors are now self-managed via DetectorRegistry.
     ]]
     function NexusGuard:StartProtectionModules()
-        print("^2[NexusGuard]^7 Starting auxiliary modules...")
+        print("^2[NexusGuard]^7 Starting auxiliary modules (e.g., Rich Presence)...")
         self:InitializeRichPresence()
-        print("^2[NexusGuard]^7 Auxiliary modules started.")
+        -- Other non-detector modules could be started here
+        print("^2[NexusGuard]^7 Auxiliary modules initialization process completed.")
     end
 
     --[[
@@ -226,29 +227,40 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         Handles Discord integration
     ]]
     function NexusGuard:InitializeRichPresence()
-        local rpConfig = Config and Config.Discord and Config.Discord.RichPresence
-        if not rpConfig or not rpConfig.Enabled then
+        -- Ensure Config and necessary sub-tables exist
+        if not Config or not Config.Discord or not Config.Discord.RichPresence then
+            print("^3[NexusGuard] Rich Presence configuration missing or incomplete. Skipping initialization.^7")
             return
         end
 
-        if rpConfig.AppId then
-            SetDiscordAppId(rpConfig.AppId)
-        else
-            print("^3[NexusGuard] Rich Presence enabled but AppId is missing in config.^7")
-            return -- Don't start update thread if AppId is missing
+        local rpConfig = Config.Discord.RichPresence
+        if not rpConfig.Enabled then
+            print("^3[NexusGuard] Rich Presence disabled in config.^7")
+            return
         end
+
+        if not rpConfig.AppId or rpConfig.AppId == "" or rpConfig.AppId == "1234567890" then
+            print("^1[NexusGuard] Rich Presence enabled but AppId is missing, empty, or default in config. Rich Presence will not function.^7")
+            return -- Don't start update thread if AppId is invalid
+        end
+
+        -- Set AppId only if valid
+        SetDiscordAppId(rpConfig.AppId)
+        print("^2[NexusGuard] Rich Presence AppId set: " .. rpConfig.AppId .. "^7")
 
         -- Set up presence update thread
         Citizen.CreateThread(function()
-            while true do -- Loop continues as long as the resource is running
-                 -- Check config again inside loop in case it changes dynamically (unlikely here)
+            while true do
+                 -- Check config again inside loop in case it changes dynamically or resource restarts
                  local currentRpConfig = Config and Config.Discord and Config.Discord.RichPresence
-                 if not currentRpConfig or not currentRpConfig.Enabled then
-                     -- If disabled dynamically, stop the thread by breaking loop
-                     print("^3[NexusGuard] Rich Presence disabled, stopping update thread.^7")
-                     break
+                 -- Also check if AppId is still valid (in case config was reloaded badly)
+                 if not currentRpConfig or not currentRpConfig.Enabled or not currentRpConfig.AppId or currentRpConfig.AppId == "" or currentRpConfig.AppId == "1234567890" then
+                     print("^3[NexusGuard] Rich Presence disabled or AppId invalid, stopping update thread.^7")
+                     ClearDiscordPresence() -- Clear presence if disabled
+                     break -- Exit the loop
                  end
 
+                -- Update presence only if enabled and AppId is valid
                 self:UpdateRichPresence()
                 local interval = (currentRpConfig.UpdateInterval or 60) * 1000
                 Citizen.Wait(interval)
@@ -262,23 +274,33 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         Updates Discord status with player info
     ]]
     function NexusGuard:UpdateRichPresence()
-        local rpConfig = Config and Config.Discord and Config.Discord.RichPresence
-        if not rpConfig or not rpConfig.Enabled then return end -- Should be caught by loop check, but double-check
+        -- Re-check config validity within the update function itself
+        if not Config or not Config.Discord or not Config.Discord.RichPresence then return end
+        local rpConfig = Config.Discord.RichPresence
+        if not rpConfig.Enabled or not rpConfig.AppId or rpConfig.AppId == "" or rpConfig.AppId == "1234567890" then return end
+
+        -- Clear previous actions before setting new ones
+        ClearDiscordPresenceAction(0)
+        ClearDiscordPresenceAction(1)
 
         -- Set rich presence assets if configured
-        if rpConfig.LargeImage then
-            SetDiscordRichPresenceAsset(rpConfig.LargeImage)
-            if rpConfig.LargeImageText then SetDiscordRichPresenceAssetText(rpConfig.LargeImageText) end
+        if rpConfig.largeImageKey and rpConfig.largeImageKey ~= "" then
+            SetDiscordRichPresenceAsset(rpConfig.largeImageKey)
+            SetDiscordRichPresenceAssetText(rpConfig.LargeImageText or "") -- Use configured text or empty string
+        else
+            ClearDiscordRichPresenceAsset() -- Clear asset if not configured
         end
-        if rpConfig.SmallImage then
-            SetDiscordRichPresenceAssetSmall(rpConfig.SmallImage)
-            if rpConfig.SmallImageText then SetDiscordRichPresenceAssetSmallText(rpConfig.SmallImageText) end
+        if rpConfig.smallImageKey and rpConfig.smallImageKey ~= "" then
+            SetDiscordRichPresenceAssetSmall(rpConfig.smallImageKey)
+            SetDiscordRichPresenceAssetSmallText(rpConfig.SmallImageText or "") -- Use configured text or empty string
+        else
+             ClearDiscordRichPresenceAssetSmall() -- Clear small asset if not configured
         end
 
         -- Set action buttons
         if rpConfig.buttons then
             for i, button in ipairs(rpConfig.buttons) do
-                if button.label and button.url and i <= 2 then -- Discord allows max 2 buttons
+                if button.label and button.label ~= "" and button.url and button.url ~= "" and i <= 2 then -- Discord allows max 2 buttons
                     SetDiscordRichPresenceAction(i - 1, button.label, button.url)
                 end
             end
@@ -292,14 +314,16 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         if health < 0 then health = 0 end
 
         local coords = GetEntityCoords(ped)
-        local streetHash, crossingHash = GetStreetNameAtCoord(coords.x, coords.y, coords.z)
-        local streetName = streetHash ~= 0 and GetStreetNameFromHashKey(streetHash) or "Unknown Location"
+        local streetHash, _ = GetStreetNameAtCoord(coords.x, coords.y, coords.z)
+        local streetName = (streetHash ~= 0 and GetStreetNameFromHashKey(streetHash)) or "Unknown Location"
 
-        -- Format presence text (Example)
-        local presence = string.format("ID: %s | %s | HP: %s%% | %s",
-            serverId, playerName, health, streetName)
+        -- Format presence text (Example - Consider making this configurable)
+        local details = string.format("ID: %s | HP: %s%%", serverId, health) -- Top line
+        local state = string.format("%s | %s", playerName, streetName) -- Bottom line
 
-        SetRichPresence(presence)
+        -- Use SetDiscordRichPresence() for details and SetDiscordRichPresenceState() for state
+        SetDiscordRichPresence(details)
+        SetDiscordRichPresenceState(state)
     end
 
     --[[
@@ -337,69 +361,92 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
     -- Use EventRegistry for handlers where possible
     local receiveTokenEvent = (_G.EventRegistry and _G.EventRegistry.GetEventName('SECURITY_RECEIVE_TOKEN')) or "NexusGuard:ReceiveSecurityToken"
     AddEventHandler(receiveTokenEvent, function(token)
-        if not token or type(token) ~= "string" then return end
+        if not token or type(token) ~= "string" then
+             print("^1[NexusGuard] Received invalid security token.^7")
+             return
+        end
         NexusGuard.securityToken = token
-        print("[NexusGuard] Security handshake completed via " .. receiveTokenEvent)
+        print("^2[NexusGuard] Security handshake completed via " .. receiveTokenEvent .. "^7")
     end)
 
     -- Handler for the local warning event (doesn't need registry)
     AddEventHandler("NexusGuard:CheatWarning", function(type, details)
-        -- Use chat resource if available
-        if exports.chat then
+        -- Use chat resource if available and configured
+        if Config and Config.Actions and Config.Actions.notifyPlayer and exports.chat then
+            -- Ensure details is a string or convert it safely
+            local detailStr = type(details) == "table" and (json and json.encode(details) or "details") or tostring(details or "details")
             exports.chat:addMessage({
-                color = { 255, 0, 0 },
+                color = { 255, 0, 0 }, -- Red
                 multiline = true,
                 args = {
-                    "[NexusGuard]",
-                    "Suspicious activity detected! Type: " .. type ..
-                    ". Further violations will result in automatic ban."
+                    "[NexusGuard Warning]",
+                    "Suspicious activity detected! Type: ^*" .. type .. "^r. Details: ^*" .. detailStr .. "^r. Further violations may result in action."
                 }
             })
-        else
-            -- Fallback print if chat resource isn't available
-            print("^1[NexusGuard] Suspicious activity detected! Type: " .. type .. ". Further violations will result in automatic ban.^7")
+        elseif Config and Config.Actions and Config.Actions.notifyPlayer then
+            -- Fallback print if chat resource isn't available but notification is enabled
+            print("^1[NexusGuard Warning] Suspicious activity detected! Type: " .. type .. ". Further violations may result in action.^7")
         end
+        -- Note: This warning is purely client-side informational based on the first ReportCheat call.
     end)
 
     -- Handler for screenshot request from server
     local requestScreenshotEvent = (_G.EventRegistry and _G.EventRegistry.GetEventName('ADMIN_REQUEST_SCREENSHOT')) or "nexusguard:requestScreenshot"
     AddEventHandler(requestScreenshotEvent, function()
-        if not NexusGuard.initialized then print("^3[NexusGuard] Screenshot requested but not initialized.^7") return end
-        if not exports['screenshot-basic'] then print("^1[NexusGuard] Screenshot requested but 'screenshot-basic' export not found.^7") return end
+        if not NexusGuard.initialized then print("^3[NexusGuard] Screenshot requested but core is not initialized.^7") return end
 
-        -- Ensure Config and webhookURL are available
-        local webhookURL = Config and Config.ScreenCapture and Config.ScreenCapture.webhookURL
+        -- Check if screenshot feature and dependency are enabled/available
+        if not Config or not Config.ScreenCapture or not Config.ScreenCapture.enabled then
+             print("^3[NexusGuard] Screenshot requested but feature is disabled in config.^7")
+             return
+        end
+        if not exports['screenshot-basic'] then
+             print("^1[NexusGuard] Screenshot requested but 'screenshot-basic' resource/export not found. Ensure it's started.^7")
+             return
+        end
+
+        -- Ensure webhookURL is configured
+        local webhookURL = Config.ScreenCapture.webhookURL
         if not webhookURL or webhookURL == "" then
-            print("^1[NexusGuard] Screenshot requested but webhookURL is not configured.^7")
+            print("^1[NexusGuard] Screenshot requested but Config.ScreenCapture.webhookURL is not configured.^7")
             return
         end
 
         -- Take screenshot and send to webhook
         exports['screenshot-basic']:requestScreenshotUpload(
             webhookURL,
-            'files[]',
+            'files[]', -- Standard field name for screenshot-basic uploads
             function(data)
-                if not data then return end
+                if not data then
+                    print("^1[NexusGuard] Screenshot upload failed (no data returned). Check webhook URL and resource status.^7")
+                    return
+                end
 
-                -- Ensure JSON library is available
+                -- Ensure JSON library is available for decoding the response
                 if not json then
-                    print("^1[NexusGuard] JSON library not available for screenshot callback.^7")
+                    print("^1[NexusGuard] JSON library not available for screenshot callback. Cannot process response.^7")
                     return
                 end
 
                 local success, resp = pcall(json.decode, data)
-                if success and resp and resp.attachments and resp.attachments[1] then
+                if success and resp and resp.attachments and resp.attachments[1] and resp.attachments[1].url then
+                    local screenshotUrl = resp.attachments[1].url
+                    print("^2[NexusGuard] Screenshot uploaded successfully: " .. screenshotUrl .. "^7")
                     -- Report screenshot taken back to server
                     if _G.EventRegistry then
-                         _G.EventRegistry.TriggerServerEvent('ADMIN_SCREENSHOT_TAKEN', resp.attachments[1].url, NexusGuard.securityToken)
+                         _G.EventRegistry.TriggerServerEvent('ADMIN_SCREENSHOT_TAKEN', screenshotUrl, NexusGuard.securityToken)
                     else
-                        TriggerServerEvent('nexusguard:screenshotTaken', resp.attachments[1].url, NexusGuard.securityToken) -- Fallback
+                        TriggerServerEvent('nexusguard:screenshotTaken', screenshotUrl, NexusGuard.securityToken) -- Fallback
                     end
                 else
-                    print("^1[NexusGuard] Failed to decode screenshot response or response invalid: " .. tostring(data) .. "^7")
+                    -- Log the raw response if decoding fails or structure is unexpected
+                    print("^1[NexusGuard] Failed to decode screenshot response or response structure invalid. Raw response: " .. tostring(data) .. "^7")
+                    -- Optionally report failure back to server
+                    -- TriggerServerEvent('nexusguard:screenshotFailed', NexusGuard.securityToken)
                 end
             end
         )
+        print("^2[NexusGuard] Screenshot requested and upload initiated.^7")
     end)
 
     -- Initialize on resource start
