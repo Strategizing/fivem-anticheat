@@ -15,7 +15,11 @@ shared_scripts {
     'globals.lua',
     'shared/utils.lua',
     'shared/constants.lua',
-    'shared/discord_config.lua'
+    'shared/discord_config.lua',
+    'shared/detector_registry.lua',
+    'shared/config_validator.lua',
+    'shared/event_registry.lua',
+    'shared/version_compat.lua'
 }
 
 client_scripts {

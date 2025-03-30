@@ -9,20 +9,24 @@ local ClientsLoaded = {}
 
 -- Add this after loading configs
 function ValidateConfig()
-    -- Ensure core config sections exist with proper defaults
-    if not Config.AI then Config.AI = {enabled = false} end
-    if not Config.Actions then Config.Actions = {
-        kickOnSuspicion = true,
-        banOnConfirmed = true,
-        reportToAdminsOnSuspicion = true
-    } end
-    if not Config.ScreenCapture then Config.ScreenCapture = {enabled = false} end
-    if not Config.Database then Config.Database = {enabled = false, historyDuration = 30} end
-    if not Config.Thresholds then Config.Thresholds = {aiDecisionConfidenceThreshold = 0.75} end
-    if not Config.AdminGroups then Config.AdminGroups = {"admin", "superadmin"} end
-    
-    -- Log configuration status
-    print('^2[NexusGuard]^7 Configuration validated')
+    -- Apply schema validation
+    if ConfigValidator then
+        Config = ConfigValidator.Apply(Config)
+    else
+        -- Fallback to basic validation
+        if not Config.AI then Config.AI = {enabled = false} end
+        if not Config.Actions then Config.Actions = {
+            kickOnSuspicion = true,
+            banOnConfirmed = true,
+            reportToAdminsOnSuspicion = true
+        } end
+        if not Config.ScreenCapture then Config.ScreenCapture = {enabled = false} end
+        if not Config.Database then Config.Database = {enabled = false, historyDuration = 30} end
+        if not Config.Thresholds then Config.Thresholds = {aiDecisionConfidenceThreshold = 0.75} end
+        if not Config.AdminGroups then Config.AdminGroups = {"admin", "superadmin"} end
+        
+        print('^2[NexusGuard]^7 Basic configuration validation complete')
+    end
 end
 
 -- Initialize the anti-cheat

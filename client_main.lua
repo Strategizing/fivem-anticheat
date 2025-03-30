@@ -233,133 +233,151 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
                     self.moduleStatus.teleport = currentTime
                 end
                 
-                if Config.Detectors.noclip and (timeSinceLastCheck.noclip or 0) > self.intervals.noclip then        if Config.Detectors.noclip and (timeSinceLastCheck.noclip or 0) > self.intervals.noclip then
-                    self:SafeDetect(self.DetectNoClip, "noclip")tectNoClip, "noclip")
-                    self.moduleStatus.noclip = currentTime currentTime
+                if Config.Detectors.noclip and (timeSinceLastCheck.noclip or 0) > self.intervals.noclip then
+                    self:SafeDetect(self.DetectNoClip, "noclip")
+                    self.moduleStatus.noclip = currentTime
                 end
                         
-                if Config.Detectors.menuDetection and (timeSinceLastCheck.menuDetection or 0) > self.intervals.menuDetection thenuDetection and (timeSinceLastCheck.menuDetection or 0) > self.intervals.menuDetection then
-                    self:SafeDetect(self.DetectModMenus, "menuDetection")tectModMenus, "menuDetection")
+                if Config.Detectors.menuDetection and (timeSinceLastCheck.menuDetection or 0) > self.intervals.menuDetection then
+                    self:SafeDetect(self.DetectModMenus, "menuDetection")
                     self.moduleStatus.menuDetection = currentTime
-                endd
+                end
                      
-                -- Resource monitoring runs less frequently        -- Resource monitoring runs less frequently
-                if Config.Detectors.resourceInjection and (currentTime - self.resources.lastCheck) > self.intervals.resourceMonitor theneInjection and (currentTime - self.resources.lastCheck) > self.intervals.resourceMonitor then
-                    self:SafeDetect(self.MonitorResources, "resourceMonitor")ources, "resourceMonitor")
+                -- Resource monitoring runs less frequently
+                if Config.Detectors.resourceInjection and (currentTime - self.resources.lastCheck) > self.intervals.resourceMonitor then
+                    self:SafeDetect(self.MonitorResources, "resourceMonitor")
                     self.resources.lastCheck = currentTime
-                endd
-                     
-                ::continue::        ::continue::
+                end
+
+                ::continue::
             end
         end)
         
         -- Initialize rich presence if configured
-        self:InitializeRichPresence():InitializeRichPresence()
+        self:InitializeRichPresence()
     end
     
     --[[
-        God Mode Detectione Detection
-        Checks for invincibility and abnormal health valuescks for invincibility flags and abnormal health values
+        God Mode Detection
+        Checks for invincibility flags and abnormal health values
     ]]
     function NexusGuard:DetectGodMode()
-        local ped = PlayerPedId()erId()
+        local ped = PlayerPedId()
         local player = PlayerId()
         
-        -- Safety checks-- Safety checks
-        if not DoesEntityExist(ped) then return end(ped) then return end
+        -- Safety checks
+        if not DoesEntityExist(ped) then return end
         
-        local health = GetEntityHealth(ped) local health = GetEntityHealth(ped)
-        local maxHealth = GetPedMaxHealth(ped)    local maxHealth = GetPedMaxHealth(ped)
-        local armor = GetPedArmour(ped)local armor = GetPedArmour(ped)
+        local health = GetEntityHealth(ped)
+        local maxHealth = GetPedMaxHealth(ped)
+        local armor = GetPedArmour(ped)
         
         -- Check for invincibility flag
-        if GetPlayerInvincible(player) then  if GetPlayerInvincible(player) then
-            self:ReportCheat("godmode", "Player has invincibility flag enabled")s invincibility flag enabled")
+        if GetPlayerInvincible(player) then
+            self:ReportCheat("godmode", "Player has invincibility flag enabled")
             return
-        endend
+        end
         
         -- Check for abnormal health values
-        if health > maxHealth and health > 200 thenif health > maxHealth and health > 200 then
-            self:ReportCheat("godmode", "Abnormal health detected: " .. health .. "/" .. maxHealth)alth detected: " .. health .. "/" .. maxHealth)
-            return    return
+        if health > maxHealth and health > 200 then
+            self:ReportCheat("godmode", "Abnormal health detected: " .. health .. "/" .. maxHealth)
+            return
         end
         
         -- Track health regeneration (if enabled)
-        if self.state.health < health and health < maxHealth thenth then
-            local healthIncrease = health - self.state.healthlocal healthIncrease = health - self.state.health
-            local threshold = (Config.Thresholds and Config.Thresholds.healthRegenerationRate) or 2.0g.Thresholds.healthRegenerationRate) or 2.0
+        if self.state.health < health and health < maxHealth then
+            local healthIncrease = health - self.state.health
+            local threshold = (Config.Thresholds and Config.Thresholds.healthRegenerationRate) or 2.0
             
-            -- If health increased too rapidly without medical item use medical item use
-            if healthIncrease > threshold thenshold then
-                self:ReportCheat("godmode", "Abnormal health regeneration: +" .. healthIncrease .. " HP")e", "Abnormal health regeneration: +" .. healthIncrease .. " HP")
+            -- If health increased too rapidly without medical item use
+            if healthIncrease > threshold then
+                self:ReportCheat("godmode", "Abnormal health regeneration: +" .. healthIncrease .. " HP")
             end
         end
         
-        -- Check for armor anomalies (if armor is abnormally high)rmor anomalies (if armor is abnormally high)
-        if armor > 100 thenr > 100 then
-            self:ReportCheat("godmode", "Abnormal armor value: " .. armor)self:ReportCheat("godmode", "Abnormal armor value: " .. armor)
+        -- Check for armor anomalies (if armor is abnormally high)
+        if armor > 100 then
+            self:ReportCheat("godmode", "Abnormal armor value: " .. armor)
         end
         
-        -- Update player statepdate player state
-        self.state.health = healthples or time passed
+        -- Update player state
+        self.state.health = health
     end
     
-    --[[ + 1
-        Weapon Modification Detectionation Detection        return
-        Checks for modified weapon damage and clip sizefor modified weapon damage and clip size
+    --[[
+        Weapon Modification Detection
+        Checks for modified weapon damage and clip size
     ]]
-    function NexusGuard:DetectWeaponModification()n modifications with configurable thresholds
+    function NexusGuard:DetectWeaponModification()
         local ped = PlayerPedId()
         
-        -- Safety checksgeThreshold then
-        if not DoesEntityExist(ped) then return ende modified: " .. damage .. 
+        -- Safety checks
+        if not DoesEntityExist(ped) then return end
         
-        local weaponHash = GetSelectedPedWeapon(ped)eaponHash = GetSelectedPedWeapon(ped)    end
+        local weaponHash = GetSelectedPedWeapon(ped)
         
         -- Only check if player has a weapon equipped
-        if weaponHash ~= GetHashKey("WEAPON_UNARMED") thenod", "Weapon clip size modified: " .. clipSize .. 
-            local damage = GetWeaponDamage(weaponHash, 0) storedStats.clipSize .. ")")
-            local clipSize = GetWeaponClipSize(weaponHash)al clipSize = GetWeaponClipSize(weaponHash)
+        if weaponHash ~= GetHashKey("WEAPON_UNARMED") then
+            local damage = GetWeaponDamage(weaponHash)
+            local clipSize = GetWeaponClipSize(weaponHash)
              
-            -- Initialize weapon stats if not yet recorded     -- Initialize weapon stats if not yet recorded
-            if weaponHash and not self.state.weaponStats[weaponHash] then        if weaponHash and not self.state.weaponStats[weaponHash] then
-                self.state.weaponStats[weaponHash] = {        self.state.weaponStats[weaponHash] = {
-                    damage = damage, damage,
+            -- Initialize weapon stats if not yet recorded
+            if weaponHash and not self.state.weaponStats[weaponHash] then
+                self.state.weaponStats[weaponHash] = {
+                    damage = damage,
                     clipSize = clipSize,
-                    firstSeen = GetGameTimer(),              firstSeen = GetGameTimer(),
+                    firstSeen = GetGameTimer(),
                     samples = 1
                 }
-                return                       " (Expected: " .. storedStats.damage .. ")")
-            endcks
+                return
+            end
             
-            -- Compare with previously stored values    if clipSize > storedStats.clipSize * 2 then
-            local storedStats = self.state.weaponStats[weaponHash] clip size modified: " .. clipSize .. 
+            -- Compare with previously stored values
+            local storedStats = self.state.weaponStats[weaponHash]
             
-            -- Only check after collecting enough samples or time passed    end
+            -- Only check after collecting enough samples or time passed
             if GetGameTimer() - storedStats.firstSeen < 10000 and storedStats.samples < 3 then
                 -- Still in learning phase, update samples
                 storedStats.samples = storedStats.samples + 1
-                returncle)
-            endModelMaxSpeed(model)
-            ks for abnormal vehicle or player movement speeds
+                return
+            end
+            
             -- Check for weapon modifications with configurable thresholds
-            local damageThreshold = (Config.Thresholds and Config.Thresholds.weaponDamageMultiplier) or 1.5 kmhSpeed = math.floor(speed * 3.6)
+            local damageThreshold = (Config.Thresholds and Config.Thresholds.weaponDamageMultiplier) or 1.5
             
             if damage > storedStats.damage * damageThreshold then
-                self:ReportCheat("weaponmod", "Weapon damage modified: " .. damage .. eed .. " km/h)")
-        if not DoesEntityExist(ped) then return end       " (Expected: " .. storedStats.damage .. ")")
+                self:ReportCheat("weaponmod", "Weapon damage modified: " .. damage .. 
+                              " (Expected: " .. storedStats.damage .. ")")
+            end
+            
+            if clipSize > storedStats.clipSize * 2 then
+                self:ReportCheat("weaponmod", "Weapon clip size modified: " .. clipSize .. 
+                              " (Expected: " .. storedStats.clipSize .. ")")
+            end
+        end
+    end
+    
+    --[[
+        Speed Hack Detection
+        Checks for abnormal vehicle or player movement speeds
+    ]]
+    function NexusGuard:DetectSpeedHack()
+        local ped = PlayerPedId()
         
-        local vehicle = GetVehiclePedIsIn(ped, false)    
-        local speedThreshold = (Config.Thresholds and Config.Thresholds.speedHackMultiplier) or 1.3* 2 then
-        ", "Weapon clip size modified: " .. clipSize .. 
-        if vehicle ~= 0 then: " .. storedStats.clipSize .. ")")
+        -- Safety checks
+        if not DoesEntityExist(ped) then return end
+        
+        local vehicle = GetVehiclePedIsIn(ped, false)
+        local speedThreshold = (Config.Thresholds and Config.Thresholds.speedHackMultiplier) or 1.3
+        
+        if vehicle ~= 0 then
             -- Vehicle speed check
-            local speed = GetEntitySpeed(vehicle)end
+            local speed = GetEntitySpeed(vehicle)
             local model = GetEntityModel(vehicle)
             local maxSpeed = GetVehicleModelMaxSpeed(model)
             
             if maxSpeed > 0 and speed > maxSpeed * speedThreshold then
-                local kmhSpeed = math.floor(speed * 3.6)ks for abnormal vehicle or player movement speeds
+                local kmhSpeed = math.floor(speed * 3.6)
                 local kmhMaxSpeed = math.floor(maxSpeed * 3.6)
                 self:ReportCheat("speedhack", "Vehicle speed abnormal: " .. kmhSpeed .. 
                               " km/h (Max: " .. kmhMaxSpeed .. " km/h)")
@@ -367,105 +385,105 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         else
             -- On-foot speed check
             local speed = GetEntitySpeed(ped)
-            if speed > 10.0 and not IsPedInParachuteFreeFall(ped) thenehicle = GetVehiclePedIsIn(ped, false)
-                self:ReportCheat("speedhack", "Player movement speed abnormal: " .. al speedThreshold = (Config.Thresholds and Config.Thresholds.speedHackMultiplier) or 1.3
+            if speed > 10.0 and not IsPedInParachuteFreeFall(ped) then
+                self:ReportCheat("speedhack", "Player movement speed abnormal: " .. 
                               math.floor(speed * 3.6) .. " km/h")
             end
         end
     end
-         local model = GetEntityModel(vehicle)
-    --[[        local maxSpeed = GetVehicleModelMaxSpeed(model)
-        Teleport Detection    
-        Checks for sudden position changes that aren't possible normally> 0 and speed > maxSpeed * speedThreshold then
-    ]].6)
-    function NexusGuard:DetectTeleport()          local kmhMaxSpeed = math.floor(maxSpeed * 3.6)
-        local ped = PlayerPedId()dhack", "Vehicle speed abnormal: " .. kmhSpeed .. 
-        m/h (Max: " .. kmhMaxSpeed .. " km/h)")
-        -- Safety checks    end
+    
+    --[[
+        Teleport Detection
+        Checks for sudden position changes that aren't possible normally
+    ]]
+    function NexusGuard:DetectTeleport()
+        local ped = PlayerPedId()
+        
+        -- Safety checks
         if not DoesEntityExist(ped) then return end
         
         local currentPos = GetEntityCoords(ped)
-        local lastPos = self.state.positionarachuteFreeFall(ped) then
-        local currentTime = GetGameTimer()        self:ReportCheat("speedhack", "Player movement speed abnormal: " .. 
-        local teleportThreshold = (Config.Thresholds and Config.Thresholds.teleportDistance) or 100.0(speed * 3.6) .. " km/h")
+        local lastPos = self.state.position
+        local currentTime = GetGameTimer()
+        local teleportThreshold = (Config.Thresholds and Config.Thresholds.teleportDistance) or 100.0
         
-        -- Only check if we have a valid previous positionend
+        -- Only check if we have a valid previous position
         if lastPos and (lastPos.x ~= 0 or lastPos.y ~= 0 or lastPos.z ~= 0) then
             local distance = #(currentPos - lastPos)
             local timeDiff = currentTime - self.state.lastPositionUpdate
             
             -- If player moved more than threshold in less than 1 second without vehicle
             if distance > teleportThreshold and timeDiff < 1000 and GetVehiclePedIsIn(ped, false) == 0 then
-                -- Ignore legitimate teleports (game loading screens, etc)tion NexusGuard:DetectTeleport()
+                -- Ignore legitimate teleports (game loading screens, etc)
                 if not IsPlayerSwitchInProgress() and not IsScreenFadedOut() then
                     self:ReportCheat("teleport", "Possible teleport detected: " .. 
                                   math.floor(distance) .. " meters in " .. timeDiff .. "ms")
                 end
             end
         end
-        stPos = self.state.position
+        
         -- Update player state
-        self.state.position = currentPosg.Thresholds.teleportDistance) or 100.0
+        self.state.position = currentPos
         self.state.lastPositionUpdate = currentTime
-    endcheck if we have a valid previous position
+    end
     
-    --[[os)
+    --[[
         NoClip Detection
         Checks for floating without proper game state
     ]]
-    function NexusGuard:DetectNoClip()alse) == 0 then
-        local ped = PlayerPedId()re legitimate teleports (game loading screens, etc)
-        not IsPlayerSwitchInProgress() and not IsScreenFadedOut() then
-        -- Safety checks     self:ReportCheat("teleport", "Possible teleport detected: " .. 
-        if not DoesEntityExist(ped) then return end                       math.floor(distance) .. " meters in " .. timeDiff .. "ms")
-        if GetVehiclePedIsIn(ped, false) ~= 0 then return end         end
-        if IsEntityDead(ped) then return end        end
-        end
+    function NexusGuard:DetectNoClip()
+        local ped = PlayerPedId()
+        
+        -- Safety checks
+        if not DoesEntityExist(ped) then return end
+        if GetVehiclePedIsIn(ped, false) ~= 0 then return end
+        if IsEntityDead(ped) then return end
+        
         local pos = GetEntityCoords(ped)
         local tolerance = (Config.Thresholds and Config.Thresholds.noclipTolerance) or 3.0
-          self.state.position = currentPos
-        -- Ensure valid positioncurrentTime
+        
+        -- Ensure valid position
         if not pos or not pos.x then return end
         
         -- Get ground information
         local success, groundZ = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z, false)
-        local distanceToGround = pos.z - (groundZ or pos.z)cks for floating without proper game state
+        local distanceToGround = pos.z - (groundZ or pos.z)
         
         -- Check if player is floating significantly above ground
         if success and distanceToGround > tolerance then
             -- Check if player is in a legitimate falling state 
-            if not IsPedInParachuteFreeFall(ped) and     -- Safety checks
-               not IsPedFalling(ped) and if not DoesEntityExist(ped) then return end
-               not IsPedJumpingOutOfVehicle(ped) thenn(ped, false) ~= 0 then return end
+            if not IsPedInParachuteFreeFall(ped) and 
+               not IsPedFalling(ped) and 
+               not IsPedJumpingOutOfVehicle(ped) then
                 
                 -- Get velocity to determine if player is stationary in air  
                 local _, _, zVelocity = GetEntityVelocity(ped)
-                zVelocity = zVelocity or 0nd Config.Thresholds.noclipTolerance) or 3.0
+                zVelocity = zVelocity or 0
                 
                 -- If player is floating and not moving vertically (not falling)
-                if math.abs(zVelocity) < 0.1 thenif not pos or not pos.x then return end
+                if math.abs(zVelocity) < 0.1 then
                     local collisionDisabled = GetEntityCollisionDisabled(ped)
                     if collisionDisabled then
-                        self:ReportCheat("noclip", "NoClip detected: Collision disabled while floating " ..  GetGroundZFor_3dCoord(pos.x, pos.y, pos.z, false)
-                                      math.floor(distanceToGround) .. " units above ground")pos.z)
+                        self:ReportCheat("noclip", "NoClip detected: Collision disabled while floating " .. 
+                                      math.floor(distanceToGround) .. " units above ground")
                     end
-                endCheck if player is floating significantly above ground
-            endif success and distanceToGround > tolerance then
-        endate
+                end
+            end
+        end
     end
-            not IsPedFalling(ped) and 
-    --[[           not IsPedJumpingOutOfVehicle(ped) then
-        Mod Menu Detection        
-        Checks for common mod menu indicatorsto determine if player is stationary in air
-    ]]ty = GetEntityVelocity(ped)
-    function NexusGuard:DetectModMenus()          zVelocity = zVelocity or 0
+    
+    --[[
+        Mod Menu Detection
+        Checks for common mod menu indicators
+    ]]
+    function NexusGuard:DetectModMenus()
         -- Check for common mod menu key combinations
-        if IsControlJustPressed(0, 178) and IsControlJustPressed(0, 51) thenoving vertically (not falling)
+        if IsControlJustPressed(0, 178) and IsControlJustPressed(0, 51) then
             -- HOME key + E key common mod menu combo
-            self:ReportCheat("modmenu", "Potential mod menu key combination detected")CollisionDisabled(ped)
-        end  if collisionDisabled then
-                     self:ReportCheat("noclip", "NoClip detected: Collision disabled while floating " .. 
-        -- Check for suspicious globals or natives that mod menus typically use                              math.floor(distanceToGround) .. " units above ground")
+            self:ReportCheat("modmenu", "Potential mod menu key combination detected")
+        end
+        
+        -- Check for suspicious globals or natives that mod menus typically use
         -- This implementation would need to be expanded with more sophisticated detection
     end
     
@@ -473,38 +491,37 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
         Resource Monitoring
         Checks for injected/unauthorized resources
     ]]
-    function NexusGuard:MonitorResources()n
-        -- Get all currently running resourcestors
+    function NexusGuard:MonitorResources()
+        -- Get all currently running resources
         local resources = {}
-        local resourceCount = GetNumResources()xusGuard:DetectModMenus()
-        heck for common mod menu key combinations
-        for i = 0, resourceCount - 1 do if IsControlJustPressed(0, 178) and IsControlJustPressed(0, 51) then
-            local resourceName = GetResourceByFindIndex(i)        -- HOME key + E key common mod menu combo
-            if resourceName then    self:ReportCheat("modmenu", "Potential mod menu key combination detected")
+        local resourceCount = GetNumResources()
+        for i = 0, resourceCount - 1 do
+            local resourceName = GetResourceByFindIndex(i)
+            if resourceName then
                 table.insert(resources, resourceName)
             end
-        end  -- Check for suspicious globals or natives that mod menus typically use
-         be expanded with more sophisticated detection
+        end
+        
         -- Send to server for verification against whitelist
         TriggerServerEvent("NexusGuard:VerifyResources", resources, self.securityToken)
     end
-    ource Monitoring
-    --[[Checks for injected/unauthorized resources
+    
+    --[[
         Rich Presence Management
         Handles Discord integration
     ]]
-    function NexusGuard:InitializeRichPresence()l resources = {}
+    function NexusGuard:InitializeRichPresence()
         -- Skip if Discord integration is disabled
         if not Config or not Config.Discord or not Config.Discord.RichPresence or 
-           not Config.Discord.RichPresence.Enabled then 0, resourceCount - 1 do
-            return local resourceName = GetResourceByFindIndex(i)
-        end    if resourceName then
+           not Config.Discord.RichPresence.Enabled then
+            return
+        end
         
         -- Initialize Discord presence
         if Config.Discord.RichPresence.AppId then
             SetDiscordAppId(Config.Discord.RichPresence.AppId)
         end
-        ServerEvent("NexusGuard:VerifyResources", resources, self.securityToken)
+        
         -- Set up presence update thread
         Citizen.CreateThread(function()
             while true do
@@ -512,145 +529,93 @@ local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread
                 Citizen.Wait(Config.Discord.RichPresence.UpdateInterval * 1000 or 60000)
             end
         end)
-    endDiscord integration is disabled
-    Config or not Config.Discord or not Config.Discord.RichPresence or 
-    --[[not Config.Discord.RichPresence.Enabled then
-        Update Rich Presence    return
+    end
+    
+    --[[
+        Update Rich Presence
         Updates Discord status with player info
     ]]
     function NexusGuard:UpdateRichPresence()
         if not Config.Discord or not Config.Discord.RichPresence or 
-           not Config.Discord.RichPresence.Enabled then    SetDiscordAppId(Config.Discord.RichPresence.AppId)
+           not Config.Discord.RichPresence.Enabled then
             return
         end
-        pdate thread
+        
         -- Set rich presence assets if configured
         if Config.Discord.RichPresence.LargeImage then
-            SetDiscordRichPresenceAsset(Config.Discord.RichPresence.LargeImage)        self:UpdateRichPresence()
-            nfig.Discord.RichPresence.UpdateInterval * 1000 or 60000)
+            SetDiscordRichPresenceAsset(Config.Discord.RichPresence.LargeImage)
+            
             if Config.Discord.RichPresence.LargeImageText then
                 SetDiscordRichPresenceAssetText(Config.Discord.RichPresence.LargeImageText)
             end
         end
-        [
-        if Config.Discord.RichPresence.SmallImage then    Update Rich Presence
-            SetDiscordRichPresenceAssetSmall(Config.Discord.RichPresence.SmallImage)Updates Discord status with player info
+        
+        if Config.Discord.RichPresence.SmallImage then
+            SetDiscordRichPresenceAssetSmall(Config.Discord.RichPresence.SmallImage)
             
-            if Config.Discord.RichPresence.SmallImageText thenence()
-                SetDiscordRichPresenceAssetSmallText(Config.Discord.RichPresence.SmallImageText)  if not Config.Discord or not Config.Discord.RichPresence or 
-            end then
+            if Config.Discord.RichPresence.SmallImageText then
+                SetDiscordRichPresenceAssetSmallText(Config.Discord.RichPresence.SmallImageText)
+            end
         end
         
         -- Set action buttons
-        if Config.Discord.RichPresence.buttons thenSet rich presence assets if configured
-            for i, button in ipairs(Config.Discord.RichPresence.buttons) doif Config.Discord.RichPresence.LargeImage then
-                if button.label and button.url and i <= 2 thenfig.Discord.RichPresence.LargeImage)
+        if Config.Discord.RichPresence.buttons then
+            for i, button in ipairs(Config.Discord.RichPresence.buttons) do
+                if button.label and button.url and i <= 2 then
                     SetDiscordRichPresenceAction(i-1, button.label, button.url)
-                endImageText then
-            endText(Config.Discord.RichPresence.LargeImageText)
-        endend
+                end
+            end
+        end
         
         -- Set rich presence text
-        local playerName = GetPlayerName(PlayerId())n
+        local playerName = GetPlayerName(PlayerId())
         local serverId = GetPlayerServerId(PlayerId())
         local health = GetEntityHealth(PlayerPedId()) - 100
-         if Config.Discord.RichPresence.SmallImageText then
-        if health < 0 then health = 0 end         SetDiscordRichPresenceAssetSmallText(Config.Discord.RichPresence.SmallImageText)
-                end
-        -- Get location infoend
+        
+        if health < 0 then health = 0 end
+        
+        -- Get location info
         local coords = GetEntityCoords(PlayerPedId())
-        local streetName = GetStreetNameFromHashKey(GetStreetNameAtCoord(coords.x, coords.y, coords.z))  -- Set action buttons
+        local streetName = GetStreetNameFromHashKey(GetStreetNameAtCoord(coords.x, coords.y, coords.z))
         
-        -- Format presence text.buttons) do
-        local presence = string.format("ID: %s | %s | HP: %s%% | %s",         if button.label and button.url and i <= 2 then
-            serverId, playerName, health, streetName or "Unknown Location")ceAction(i-1, button.label, button.url)
+        -- Format presence text
+        local presence = string.format("ID: %s | %s | HP: %s%% | %s", 
+            serverId, playerName, health, streetName or "Unknown Location")
         
-        SetRichPresence(presence)    end
-    end    end
+        SetRichPresence(presence)
+    end
     
     --[[
-        Cheat Reportinglocal playerName = GetPlayerName(PlayerId())
-        Sends detection info to serverId(PlayerId())
+        Cheat Reporting
+        Sends detection info to server
     ]]
     function NexusGuard:ReportCheat(type, details)
-        -- Skip if not initialized or no security token    if health < 0 then health = 0 end
+        -- Skip if not initialized or no security token
         if not self.initialized or not self.securityToken then 
             return
-        endords(PlayerPedId())
-        tStreetNameFromHashKey(GetStreetNameAtCoord(coords.x, coords.y, coords.z))
+        end
+        
         -- First detection issues a warning
         if not self.flags.warningIssued then
-            self.flags.suspiciousActivity = trues", 
-            self.flags.warningIssued = truetion")
+            self.flags.suspiciousActivity = true
+            self.flags.warningIssued = true
             
-            TriggerEvent("NexusGuard:CheatWarning", type, details)tRichPresence(presence)
+            TriggerEvent("NexusGuard:CheatWarning", type, details)
         else
             -- Use both event names for compatibility
             TriggerServerEvent("NexusGuard:ReportCheat", type, details, self.securityToken)
             TriggerServerEvent("nexusguard:detection", type, details, self.securityToken)
-        endtion info to server
+        end
     end
-    tion NexusGuard:ReportCheat(type, details)
-    --[[ity token
-        Event Handlersen 
+    
+    --[[
+        Event Handlers
     ]]
     AddEventHandler("NexusGuard:ReceiveSecurityToken", function(token)
         if not token or type(token) ~= "string" then return end
         
-        NexusGuard.securityToken = tokenelf.flags.warningIssued then
+        NexusGuard.securityToken = token
         print("[NexusGuard] Security handshake completed")
-    end)
-    
-    AddEventHandler("nexusguard:initializeClient", function(token)s)
-        if not token or type(token) ~= "string" then return end
-        both event names for compatibility
-        NexusGuard.securityToken = tokenggerServerEvent("NexusGuard:ReportCheat", type, details, self.securityToken)
-        print("[NexusGuard] Client initialized via alternate event")   TriggerServerEvent("nexusguard:detection", type, details, self.securityToken)
-    end)end
-    end
-    AddEventHandler("NexusGuard:CheatWarning", function(type, details)
-        TriggerEvent('chat:addMessage', {
-            color = { 255, 0, 0 },
-            multiline = true,
-            args = { veSecurityToken", function(token)
-                "[NexusGuard]", ype(token) ~= "string" then return end
-                "Suspicious activity detected! Type: " .. type .. 
-                ". Further violations will result in automatic ban." NexusGuard.securityToken = token
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    end)        NexusGuard:Initialize()        Citizen.Wait(500)        -- Allow Config to load first                if GetCurrentResourceName() ~= resourceName then return end    AddEventHandler('onClientResourceStart', function(resourceName)    -- Initialize on resource start        end)        )            end                end                                       NexusGuard.securityToken)                                       resp.attachments[1].url,                     TriggerServerEvent('nexusguard:screenshotTaken',                 if success and resp and resp.attachments and resp.attachments[1] then                local success, resp = pcall(json.decode, data)                                if not data then return end            function(data)            'files[]',             Config.ScreenCapture.webhookURL,         exports['screenshot-basic']:requestScreenshotUpload(        -- Take screenshot and send to webhook                end            return         if not NexusGuard.initialized or not exports['screenshot-basic'] then     AddEventHandler("nexusguard:requestScreenshot", function()        end)        })            }        print("[NexusGuard] Security handshake completed")
     end)
     
     AddEventHandler("nexusguard:initializeClient", function(token)
