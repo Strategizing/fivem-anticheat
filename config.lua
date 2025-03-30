@@ -7,6 +7,7 @@ Config.DiscordWebhook = "" -- Your Discord webhook URL
 Config.BanMessage = "You have been banned for cheating. Appeal at: discord.gg/yourserver" -- Ban message
 Config.KickMessage = "You have been kicked for suspicious activity." -- Kick message
 Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups that can access admin commands
+Config.SecuritySecret = "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" -- Used for securing client-server communication (HMAC)
 
 -- Auto Configuration
 Config.AutoConfig = {
@@ -72,7 +73,30 @@ Config.AI = {
 Config.Features = {
     adminPanel = true, -- Admin panel to review detections and manage bans
     playerReports = true, -- Allow players to report suspicious activity
-    resourceVerification = true, -- Verify integrity of server resources
+    resourceVerification = {
+        enabled = false, -- Verify integrity of client resources (EXPERIMENTAL - can cause false positives)
+        mode = "whitelist", -- "whitelist" or "blacklist"
+        whitelist = { -- List of allowed resource names (if mode is "whitelist")
+            "chat",
+            "spawnmanager",
+            "mapmanager",
+            "basic-gamemode",
+            "fivem",
+            "hardcap",
+            "rconlog",
+            "sessionmanager",
+            GetCurrentResourceName() -- Always allow the anti-cheat resource itself
+            -- Add essential framework resources (e.g., es_extended, qb-core) and core resources here
+        },
+        blacklist = { -- List of disallowed resource names (if mode is "blacklist")
+            -- Add known cheat menu resource names here
+            "LambdaMenu",
+            "SimpleTrainer",
+            "menyoo"
+        },
+        kickOnMismatch = true, -- Kick player if unauthorized resources are detected
+        banOnMismatch = false -- Ban player if unauthorized resources are detected (Use with caution)
+    },
     performanceOptimization = true, -- Optimize detection methods based on server performance
     autoUpdate = true, -- Check for updates automatically
     compatibilityMode = false -- Enable for older servers with compatibility issues
@@ -169,7 +193,7 @@ Config.Discord = {
             serverStatus = true, -- Server status updates
             anticheatUpdates = true -- Anti-cheat update notifications
         }
-        },
+        }, -- Added missing comma here
         
         webhooks = {
             general = "", -- General anti-cheat logs

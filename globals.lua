@@ -18,138 +18,242 @@ local function Log(message, level)
     end
 end
 
--- Global variable to hold the ban list (loaded from file)
-local BanList = {}
+-- Global variable to hold the ban list (loaded from DB) - Now used as a cache
+local BanCache = {}
+local BanCacheExpiry = 0 -- Timestamp when cache expires
+local BanCacheDuration = 300 -- Cache duration in seconds (5 minutes)
 
--- Ban list related functions
-function LoadBanList()
-    local success, banListJson = pcall(LoadResourceFile, GetCurrentResourceName(), "data/banlist.json")
-    if success and banListJson then
-        -- Ensure json library is available before decoding
-        if not json then
-            Log("^1Error: JSON library not available for LoadBanList.^7", 1)
-            BanList = {}
-            return
-        end
-        local decodeSuccess, decodedList = pcall(json.decode, banListJson)
-        if decodeSuccess then
-            BanList = decodedList or {}
-            Log("Loaded " .. #BanList .. " bans from data/banlist.json", 2)
-        else
-            Log("^1Error decoding banlist.json: " .. tostring(decodedList) .. "^7", 1)
-            BanList = {}
-        end
-    else
-        BanList = {}
-        Log("No existing ban list found (data/banlist.json), creating new one.", 2)
-        -- Ensure SaveBanList exists before calling recursively, or handle differently
-        if _G.SaveBanList then
-             SaveBanList() -- Attempt to save an empty one
-        else
-             Log("^1Warning: SaveBanList not defined when trying to create initial ban list.^7", 1)
-        end
-    end
-end
-
-function SaveBanList()
-    -- Ensure json library is available before encoding
-    if not json then
-        Log("^1Error: JSON library not available for SaveBanList.^7", 1)
+-- Database Initialization
+function InitializeDatabase()
+    if not Config or not Config.Database or not Config.Database.enabled then
+        Log("Database integration disabled in config.", 2)
         return
     end
-    local encodeSuccess, banListJson = pcall(json.encode, BanList)
-    if encodeSuccess then
-        local saveSuccess, err = pcall(SaveResourceFile, GetCurrentResourceName(), "data/banlist.json", banListJson, -1)
-        if saveSuccess then
-            Log("Ban list saved with " .. #BanList .. " entries", 3)
-        else
-            Log("^1Error saving banlist.json: " .. tostring(err) .. "^7", 1)
-        end
-    else
-        Log("^1Error encoding ban list: " .. tostring(banListJson) .. "^7", 1)
+
+    if not MySQL then
+        Log("^1Error: MySQL object not found. Ensure oxmysql is started before NexusGuard.^7", 1)
+        return
     end
+
+    Log("Initializing database schema...", 2)
+    local schemaFile = LoadResourceFile(GetCurrentResourceName(), "sql/schema.sql")
+    if not schemaFile then
+        Log("^1Error: Could not load sql/schema.sql file.^7", 1)
+        return
+    end
+
+    -- Split schema into individual statements (basic split on ';')
+    local statements = {}
+    for stmt in string.gmatch(schemaFile, "([^;]+)") do
+        stmt = string.gsub(stmt, "^%s+", "") -- Trim leading whitespace
+        stmt = string.gsub(stmt, "%s+$", "") -- Trim trailing whitespace
+        if string.len(stmt) > 0 then
+            table.insert(statements, stmt)
+        end
+    end
+
+    -- Execute statements sequentially
+    local function executeNext(index)
+        if index > #statements then
+            Log("Database schema check/creation complete.", 2)
+            LoadBanList(true) -- Force load ban list after schema setup
+            return
+        end
+        MySQL.Async.execute(statements[index], {}, function(affectedRows)
+            -- Log("Executed schema statement " .. index, 4)
+            executeNext(index + 1) -- Execute next statement regardless of success/failure
+        end)
+    end
+
+    executeNext(1)
 end
 
-function IsPlayerBanned(license, ip)
-    if not BanList then return false end
+-- Ban list related functions (Database Driven)
+function LoadBanList(forceReload)
+    if not Config or not Config.Database or not Config.Database.enabled then return end
 
-    for _, ban in ipairs(BanList) do
-        -- Ensure ban.identifiers is a table before iterating
-        if type(ban.identifiers) == "table" then
-            for _, identifier in ipairs(ban.identifiers) do
-                -- Ensure identifier is a string before comparing
-                if type(identifier) == "string" and (identifier == license or identifier == "ip:" .. ip) then
-                    return true, ban.reason or "No reason specified"
-                end
-            end
+    local currentTime = os.time()
+    if not forceReload and BanCacheExpiry > currentTime then
+        -- Log("Using cached ban list.", 4)
+        return -- Use cached version
+    end
+
+    Log("Loading ban list from database...", 2)
+    MySQL.Async.fetchAll('SELECT * FROM nexusguard_bans WHERE expire_date IS NULL OR expire_date > NOW()', {}, function(bans)
+        if bans then
+            BanCache = bans
+            BanCacheExpiry = currentTime + BanCacheDuration
+            Log("Loaded " .. #BanCache .. " active bans from database.", 2)
+        else
+            Log("^1Error loading bans from database.^7", 1)
+            BanCache = {} -- Clear cache on error
+            BanCacheExpiry = 0
+        end
+    end)
+end
+
+-- Checks the ban cache
+function IsPlayerBanned(license, ip, discordId)
+    if not Config or not Config.Database or not Config.Database.enabled then
+        -- If DB disabled, maybe fall back to a simple file check? For now, assume not banned.
+        return false, nil
+    end
+
+    -- Trigger reload if cache expired (non-blocking)
+    if BanCacheExpiry <= os.time() then
+        LoadBanList(false)
+    end
+
+    for _, ban in ipairs(BanCache) do
+        local identifiersMatch = false
+        if license and ban.license == license then identifiersMatch = true end
+        if ip and ban.ip == ip then identifiersMatch = true end
+        if discordId and ban.discord == discordId then identifiersMatch = true end
+
+        if identifiersMatch then
+            return true, ban.reason or "No reason specified"
         end
     end
     return false, nil
 end
 
--- Placeholder: Needs actual database implementation if enabled
--- @param banData Table containing ban details (name, reason, identifiers, etc.)
+-- Stores ban in the database
+-- @param banData Table containing ban details (name, reason, license, ip, discord, admin, durationSeconds)
 function StorePlayerBan(banData)
-    if Config and Config.Database and Config.Database.enabled then
-        Log("Placeholder: Storing player ban in database: " .. (banData and banData.name or "Unknown"), 2)
-        --[[
-            IMPLEMENTATION REQUIRED:
-            Use oxmysql or your preferred DB library to insert ban details.
-            Example using oxmysql (ensure MySQL object is available):
-            local identifiersJson = json.encode(banData.identifiers or {})
-            MySQL.Async.execute(
-                'INSERT INTO nexusguard_bans (name, reason, identifiers, admin, date) VALUES (@name, @reason, @identifiers, @admin, NOW())',
-                {
-                    ['@name'] = banData.name,
-                    ['@reason'] = banData.reason,
-                    ['@identifiers'] = identifiersJson,
-                    ['@admin'] = banData.admin
-                },
-                function(affectedRows)
-                    if affectedRows > 0 then
-                        Log("Ban for " .. banData.name .. " stored in database.", 3)
-                    else
-                        Log("^1Error storing ban for " .. banData.name .. " in database.^7", 1)
-                    end
-                end
-            )
-        ]]
-        -- Example: MySQL.Async.execute('INSERT INTO nexusguard_bans ...', {banData.name, banData.reason, ...})
+    if not Config or not Config.Database or not Config.Database.enabled then return end
+    if not banData or not banData.license then
+        Log("^1Error: Cannot store ban without player license.^7", 1)
+        return
+    end
+
+    local expireDate = nil
+    if banData.durationSeconds and banData.durationSeconds > 0 then
+        expireDate = os.date("!%Y-%m-%d %H:%M:%S", os.time() + banData.durationSeconds)
+    end
+
+    MySQL.Async.execute(
+        'INSERT INTO nexusguard_bans (name, license, ip, discord, reason, admin, expire_date) VALUES (@name, @license, @ip, @discord, @reason, @admin, @expire_date)',
+        {
+            ['@name'] = banData.name,
+            ['@license'] = banData.license,
+            ['@ip'] = banData.ip,
+            ['@discord'] = banData.discord,
+            ['@reason'] = banData.reason,
+            ['@admin'] = banData.admin or "NexusGuard System",
+            ['@expire_date'] = expireDate
+        },
+        function(affectedRows)
+            if affectedRows > 0 then
+                Log("Ban for " .. banData.name .. " stored in database.", 2)
+                LoadBanList(true) -- Force reload ban cache
+            else
+                Log("^1Error storing ban for " .. banData.name .. " in database.^7", 1)
+            end
+        end
+    )
+end
+
+-- Bans a player and stores the ban
+-- @param playerId The server ID of the player to ban.
+-- @param reason The reason for the ban.
+-- @param adminName The name of the admin issuing the ban (optional, defaults to System).
+-- @param durationSeconds Duration of the ban in seconds (optional, permanent if nil).
+function BanPlayer(playerId, reason, adminName, durationSeconds)
+    local playerName = GetPlayerName(playerId)
+    if not playerName then
+        Log("^1Error: Cannot ban invalid player ID: " .. playerId .. "^7", 1)
+        return
+    end
+
+    local license = GetPlayerIdentifierByType(playerId, 'license')
+    local ip = GetPlayerEndpoint(playerId)
+    local discord = GetPlayerIdentifierByType(playerId, 'discord')
+
+    local banData = {
+        name = playerName,
+        license = license,
+        ip = string.gsub(ip or "", "ip:", ""), -- Remove ip: prefix if present
+        discord = discord,
+        reason = reason or "Banned by NexusGuard",
+        admin = adminName or "NexusGuard System",
+        durationSeconds = durationSeconds
+    }
+
+    -- Store the ban (which will also update cache)
+    StorePlayerBan(banData)
+
+    -- Kick the player
+    local banMessage = Config.BanMessage or "You have been banned."
+    if durationSeconds and durationSeconds > 0 then
+        local durationText = FormatDuration(durationSeconds) -- Requires FormatDuration helper
+        banMessage = banMessage .. " Duration: " .. durationText
+    end
+    DropPlayer(playerId, banMessage)
+
+    Log("^1Banned player: " .. playerName .. " (ID: " .. playerId .. ") Reason: " .. banData.reason .. "^7", 1)
+
+    -- Send Discord notification
+    if _G.SendToDiscord then
+        local discordMsg = string.format(
+            "**Player Banned**\n**Name:** %s\n**License:** %s\n**IP:** %s\n**Discord:** %s\n**Reason:** %s\n**Admin:** %s",
+            playerName, license or "N/A", ip or "N/A", discord or "N/A", banData.reason, banData.admin
+        )
+        if durationSeconds and durationSeconds > 0 then
+             discordMsg = discordMsg .. "\n**Duration:** " .. FormatDuration(durationSeconds)
+        end
+         _G.SendToDiscord("Player Banned", discordMsg)
     end
 end
 
+
 -- Player related functions
--- Placeholder: Needs implementation based on your server's permission system.
+-- Checks if a player has admin privileges based on Config.AdminGroups
 -- @param playerId The server ID of the player to check.
 -- @return boolean True if the player is considered an admin, false otherwise.
 function IsPlayerAdmin(playerId)
     -- Ensure Config and AdminGroups are loaded
     if not Config or not Config.AdminGroups then
         Log("^1Warning: Config.AdminGroups not found for IsPlayerAdmin check.^7", 1)
-        -- Default to false if config is missing
-        return false
+        return false -- Default to false if config is missing
     end
-    -- Ensure playerId is valid
-    if not playerId or tonumber(playerId) == nil then return false end
+    -- Ensure playerId is valid and player exists
+    local player = tonumber(playerId)
+    if not player or player <= 0 or not GetPlayerName(player) then return false end
 
+    -- Check using FiveM's built-in ACE permissions
     for _, group in ipairs(Config.AdminGroups) do
-    -- Check if IsPlayerAceAllowed exists before calling (for built-in ACE perms)
-    if _G.IsPlayerAceAllowed and IsPlayerAceAllowed(playerId, "group." .. group) then
-        return true
-        --[[
-            ALTERNATIVE IMPLEMENTATION (Example for ESX/QBCore):
-            Replace the IsPlayerAceAllowed check with framework-specific checks.
-            Example ESX:
-            local xPlayer = ESX.GetPlayerFromId(playerId)
-            if xPlayer and xPlayer.getGroup() == group then return true end
+        if IsPlayerAceAllowed(player, "group." .. group) then
+            return true
+        end
+    end
 
-            Example QBCore:
-            local QBCore = exports['qb-core']:GetCoreObject()
-            local player = QBCore.Functions.GetPlayer(playerId)
-            if player and player.PlayerData.job.name == group then return true end -- Or check ACE groups if using qb-adminmenu
-        ]]
-    end
-    end
+    -- Add framework-specific checks if needed (examples commented out)
+    --[[
+        -- Example ESX:
+        local ESX = exports['es_extended']:getSharedObject() -- Adjust export name if needed
+        if ESX then
+            local xPlayer = ESX.GetPlayerFromId(player)
+            if xPlayer then
+                 for _, group in ipairs(Config.AdminGroups) do
+                     if xPlayer.getGroup() == group then return true end
+                 end
+            end
+        end
+
+        -- Example QBCore:
+        local QBCore = exports['qb-core']:GetCoreObject()
+        if QBCore then
+            local qbPlayer = QBCore.Functions.GetPlayer(player)
+            if qbPlayer then
+                 for _, group in ipairs(Config.AdminGroups) do
+                     -- Check QBCore job/gang groups or ACE perms depending on setup
+                     if qbPlayer.PlayerData.job.name == group and qbPlayer.PlayerData.job.isboss then return true end -- Example job check
+                     -- Or check qbPlayer.PlayerData.permission or similar based on your permission setup
+                 end
+            end
+        end
+    ]]
+
     return false
 end
 
@@ -162,42 +266,103 @@ end
 -- (e.g., using HMAC signing, proper session management) for real security.
 -- #############################################################################
 
--- Placeholder: Insecure client hash validation - DO NOT USE IN PRODUCTION
+-- Placeholder: Client hash validation - Generally considered ineffective.
 -- @param hash The client-provided hash string.
 -- @return boolean Always returns true in this placeholder implementation after basic checks.
 function ValidateClientHash(hash)
-    Log("^1SECURITY WARNING: Using insecure placeholder ValidateClientHash. This provides NO real security.^7", 1)
-    -- This basic check is easily bypassed. A real implementation is complex and often futile.
-    -- Consider removing client hash checks entirely unless you have a specific, robust method.
+    -- Log("^1SECURITY WARNING: Client hash validation is generally ineffective and easily bypassed.^7", 1)
+    -- Consider removing this check entirely.
     return hash and type(hash) == "string" and string.len(hash) > 10
 end
 
--- Placeholder: Insecure token generation - DO NOT USE IN PRODUCTION
--- @param playerId The server ID of the player requesting a token.
--- @return string An insecure, predictable token.
-function GenerateSecurityToken(playerId)
-    Log("^1SECURITY WARNING: Using insecure placeholder GenerateSecurityToken. This is NOT secure.^7", 1)
-    -- This token is predictable and not cryptographically secure.
-    -- A real implementation should use HMAC signing or similar server-authoritative methods.
-    local insecureToken = GetPlayerName(playerId) .. "_" .. os.time() .. "_" .. math.random(100000, 999999)
-    -- Storing token directly in PlayerMetrics is also insecure if metrics are accessible/modifiable.
-    if _G.PlayerMetrics and _G.PlayerMetrics[playerId] then
-        _G.PlayerMetrics[playerId].securityToken = insecureToken
+-- Basic pseudo-HMAC function (NOT CRYPTOGRAPHICALLY SECURE)
+-- Uses simple string hashing as a stand-in for real HMAC-SHA256
+local function PseudoHmac(key, message)
+    -- Very basic hashing - replace with real crypto if possible
+    local hash = 0
+    for i = 1, string.len(message) do
+        hash = (hash * 31 + string.byte(message, i)) % 1000000007
     end
-    return insecureToken
+    for i = 1, string.len(key) do
+        hash = (hash * 31 + string.byte(key, i)) % 1000000007
+    end
+    return tostring(hash)
 end
 
--- Placeholder: Insecure token validation - DO NOT USE IN PRODUCTION
+-- Generates a time-based token using pseudo-HMAC
+-- @param playerId The server ID of the player requesting a token.
+-- @return string A token string containing timestamp and hash, or nil on error.
+function GenerateSecurityToken(playerId)
+    if not Config or not Config.SecuritySecret or Config.SecuritySecret == "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" then
+        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot generate secure token.^7", 1)
+        return nil
+    end
+    local timestamp = os.time()
+    local message = tostring(playerId) .. ":" .. tostring(timestamp)
+    local hash = PseudoHmac(Config.SecuritySecret, message)
+    local token = message .. ":" .. hash
+
+    -- Store the generated token's timestamp for validation window
+    if _G.PlayerMetrics and _G.PlayerMetrics[playerId] then
+        _G.PlayerMetrics[playerId].lastTokenTime = timestamp
+    end
+    -- Log("Generated token for " .. playerId .. ": " .. token, 4) -- Debugging only
+    return token
+end
+
+-- Validates a time-based token using pseudo-HMAC
 -- @param playerId The server ID of the player sending the token.
 -- @param token The token string sent by the client.
--- @return boolean True if the insecure token matches the stored one, false otherwise.
+-- @return boolean True if the token is valid and within the time window, false otherwise.
 function ValidateSecurityToken(playerId, token)
-    Log("^1SECURITY WARNING: Using insecure placeholder ValidateSecurityToken. This provides NO real security.^7", 1)
-    -- This simply compares the received token with the insecurely stored one. It does not prevent spoofing.
-    if not _G.PlayerMetrics or not _G.PlayerMetrics[playerId] then return false end
-    -- Add basic type check for token
-    if type(token) ~= "string" then return false end
-    return _G.PlayerMetrics[playerId].securityToken == token
+    if not Config or not Config.SecuritySecret or Config.SecuritySecret == "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" then
+        Log("^1SECURITY ERROR: Config.SecuritySecret is not set or is default. Cannot validate token.^7", 1)
+        return false
+    end
+    if not token or type(token) ~= "string" then return false end
+
+    -- Split token into parts: playerID:timestamp:hash
+    local parts = {}
+    for part in string.gmatch(token, "[^:]+") do
+        table.insert(parts, part)
+    end
+
+    if #parts ~= 3 then
+        Log("^1Invalid token format received from " .. playerId .. "^7", 1)
+        return false
+    end
+
+    local receivedPlayerId = tonumber(parts[1])
+    local receivedTimestamp = tonumber(parts[2])
+    local receivedHash = parts[3]
+
+    -- Basic validation
+    if not receivedPlayerId or receivedPlayerId ~= playerId or not receivedTimestamp or not receivedHash then
+        Log("^1Invalid token content received from " .. playerId .. "^7", 1)
+        return false
+    end
+
+    -- Check timestamp window (e.g., +/- 60 seconds)
+    local currentTime = os.time()
+    local timeDifference = math.abs(currentTime - receivedTimestamp)
+    local maxTimeDifference = 60 -- Allow 1 minute difference
+    if timeDifference > maxTimeDifference then
+        Log("^1Token timestamp mismatch for " .. playerId .. ". Diff: " .. timeDifference .. "s^7", 1)
+        return false
+    end
+
+    -- Regenerate the expected hash
+    local message = tostring(playerId) .. ":" .. tostring(receivedTimestamp)
+    local expectedHash = PseudoHmac(Config.SecuritySecret, message)
+
+    -- Compare hashes
+    if expectedHash == receivedHash then
+        -- Log("Token validated successfully for " .. playerId, 4) -- Debugging only
+        return true
+    else
+        Log("^1Token hash mismatch for " .. playerId .. "^7", 1)
+        return false
+    end
 end
 
 -- #############################################################################
@@ -226,43 +391,85 @@ function GetDetectionSeverity(detectionType)
     return severities[string.lower(detectionType)] or 20 -- Default severity
 end
 
--- Placeholder: Needs refinement based on actual detection logic and severity
+-- Determines if a detection warrants immediate action (kick/screenshot) based on type.
 -- @param detectionType String identifier of the detection.
 -- @param detectionData Table containing details about the detection.
 -- @return boolean True if considered high risk, false otherwise.
 function IsHighRiskDetection(detectionType, detectionData)
-    Log("Placeholder check: IsHighRiskDetection for " .. detectionType, 3)
-    -- Example: Consider resource injection and high-confidence menu detection high risk
-    -- IMPLEMENTATION REQUIRED: Define which detections warrant immediate action (kick/screenshot).
+    -- This is a basic implementation. Refine based on server needs and detection data.
+    local dtLower = string.lower(detectionType or "")
     local highRiskTypes = {
-        "resourceinjection",
-        "menudetection"
+        ["resourceinjection"] = true, -- Assumed high risk
+        ["menudetection"] = true,     -- Assumed high risk
+        ["explosionspam"] = true,
+        ["entityspam"] = true,        -- Add entity spam check
+        ["godmode"] = true,           -- Persistent godmode is high risk
+        ["noclip"] = true             -- Persistent noclip is high risk
     }
-    local dtLower = string.lower(detectionType)
-
-    for _, hrt in ipairs(highRiskTypes) do
-        if dtLower == hrt then
-            -- Add confidence check for menu detection maybe?
-            return true
-        end
-    end
-    return false
+    -- Add checks based on detectionData if needed (e.g., high confidence score)
+    -- Example: if dtLower == "speedhack" and detectionData and detectionData.multiplier > 2.0 then return true end
+    return highRiskTypes[dtLower] or false
 end
 
--- Placeholder: Needs refinement based on actual detection logic and severity
+-- Determines if a detection warrants an automatic ban based on type.
 -- @param detectionType String identifier of the detection.
 -- @param detectionData Table containing details about the detection.
 -- @return boolean True if considered a confirmed cheat (warrants ban), false otherwise.
 function IsConfirmedCheat(detectionType, detectionData)
-    Log("Placeholder check: IsConfirmedCheat for " .. detectionType, 3)
-    -- Example: Assume resource injection is always confirmed (server verified)
-    -- IMPLEMENTATION REQUIRED: Define which detections are severe enough for an automatic ban.
-    if string.lower(detectionType) == "resourceinjection" then
-        return true
-    end
-    -- Add other conditions based on data/confidence if needed
-    return false
+    -- This is a basic implementation. Refine based on server needs and detection data.
+    local dtLower = string.lower(detectionType or "")
+    local confirmedCheatTypes = {
+        ["resourceinjection"] = true -- Assume server-verified resource injection is confirmed
+        -- Add other types that are considered definitively cheating without needing AI/multiple flags
+    }
+    -- Add checks based on detectionData if needed
+    -- Example: if dtLower == "weaponmodification" and detectionData and detectionData.damageMultiplier > 5.0 then return true end
+    return confirmedCheatTypes[dtLower] or false
 end
+
+-- Stores a detection event in the database
+function StoreDetection(playerId, detectionType, detectionData)
+    if not Config or not Config.Database or not Config.Database.enabled or not Config.Database.storeDetectionHistory then return end
+    if not MySQL then return end -- DB not available
+    if not playerId or not detectionType then return end
+
+    local playerName = GetPlayerName(playerId) or "Unknown"
+    local license = GetPlayerIdentifierByType(playerId, 'license')
+    local ip = GetPlayerEndpoint(playerId)
+
+    -- Ensure JSON library is available
+    if not json then
+        Log("^1Error: JSON library not available for StoreDetection.^7", 1)
+        return
+    end
+
+    local dataJson = "{}"
+    local successEncode, result = pcall(json.encode, detectionData)
+    if successEncode then
+        dataJson = result
+    else
+        Log("^1Warning: Failed to encode detectionData for storage. Storing empty JSON. Error: " .. tostring(result) .. "^7", 1)
+    end
+
+    MySQL.Async.execute(
+        'INSERT INTO nexusguard_detections (player_name, player_license, player_ip, detection_type, detection_data) VALUES (@name, @license, @ip, @type, @data)',
+        {
+            ['@name'] = playerName,
+            ['@license'] = license,
+            ['@ip'] = string.gsub(ip or "", "ip:", ""), -- Remove ip: prefix
+            ['@type'] = detectionType,
+            ['@data'] = dataJson
+        },
+        function(affectedRows)
+            if affectedRows <= 0 then
+                Log("^1Error storing detection event for player " .. playerId .. "^7", 1)
+            -- else
+                -- Log("Stored detection event: " .. detectionType .. " for player " .. playerId, 4) -- Optional debug log
+            end
+        end
+    )
+end
+_G.StoreDetection = StoreDetection -- Expose globally
 
 
 -- #############################################################################
@@ -393,31 +600,80 @@ end
 
 -- Utility functions
 -- Placeholder: Needs actual database implementation if enabled.
+-- This function might be better suited for specific analysis rather than generic collection.
 function CollectPlayerMetrics()
-    if not Config or not Config.Database or not Config.Database.enabled then return end
-    Log("Placeholder: Collecting player metrics...", 3)
+    -- if not Config or not Config.Database or not Config.Database.enabled then return end
+    -- Log("Placeholder: Collecting player metrics...", 3)
     -- IMPLEMENTATION REQUIRED: Logic to periodically gather and potentially store
     -- aggregated metrics in the database for analysis or long-term tracking.
+    -- Example: Iterate through online players, calculate average trust score, etc.
 end
 
--- Placeholder: Needs actual database implementation if enabled.
+-- Deletes old detection records from the database
 function CleanupDetectionHistory()
-    if not Config or not Config.Database or not Config.Database.enabled then return end
-    Log("Placeholder: Cleaning up detection history...", 3)
-    -- IMPLEMENTATION REQUIRED: Logic to delete old detection records from the database
-    -- based on Config.Database.historyDuration.
-    -- Example: MySQL.Async.execute('DELETE FROM nexusguard_detections WHERE timestamp < DATE_SUB(NOW(), INTERVAL @days DAY)', {['@days'] = Config.Database.historyDuration})
+    if not Config or not Config.Database or not Config.Database.enabled or not Config.Database.historyDuration or Config.Database.historyDuration <= 0 then
+        return -- Disabled or invalid duration
+    end
+    if not MySQL then return end -- DB not available
+
+    local historyDays = Config.Database.historyDuration
+    Log("Cleaning up detection history older than " .. historyDays .. " days...", 3)
+
+    MySQL.Async.execute(
+        'DELETE FROM nexusguard_detections WHERE timestamp < DATE_SUB(NOW(), INTERVAL @days DAY)',
+        { ['@days'] = historyDays },
+        function(affectedRows)
+            if affectedRows > 0 then
+                Log("Cleaned up " .. affectedRows .. " old detection records.", 2)
+            else
+                -- Log("No old detection records found to clean up.", 4)
+            end
+        end
+    )
 end
 
--- Placeholder: Needs actual database implementation if enabled.
+-- Saves player session summary to the database on disconnect
 -- @param playerId Server ID of the player whose metrics should be saved.
 function SavePlayerMetrics(playerId)
     if not Config or not Config.Database or not Config.Database.enabled then return end
     if not _G.PlayerMetrics or not _G.PlayerMetrics[playerId] then return end
-    Log("Placeholder: Saving metrics for player " .. playerId, 3)
-    -- IMPLEMENTATION REQUIRED: Logic to save relevant player metrics (e.g., final trust score,
-    -- total detections, playtime) to the database when they disconnect.
-    -- Example: MySQL.Async.execute('INSERT INTO nexusguard_sessions (...) VALUES (...) ON DUPLICATE KEY UPDATE ...', {...})
+    if not MySQL then return end -- DB not available
+
+    local metrics = _G.PlayerMetrics[playerId]
+    local playerName = GetPlayerName(playerId) or "Unknown"
+    local license = GetPlayerIdentifierByType(playerId, 'license')
+    if not license then
+        Log("^1Warning: Cannot save metrics for player " .. playerId .. " without license identifier.^7", 1)
+        return
+    end
+
+    local connectTime = metrics.connectTime or os.time() -- Fallback if connectTime wasn't set
+    local playTime = os.time() - connectTime
+    local finalTrustScore = metrics.trustScore or 100.0
+    local totalDetections = #(metrics.detections or {})
+    local totalWarnings = metrics.warningCount or 0 -- Assuming warningCount is tracked
+
+    Log("Saving session metrics for player " .. playerId .. " (" .. playerName .. ")", 3)
+
+    MySQL.Async.execute(
+        'INSERT INTO nexusguard_sessions (player_name, player_license, connect_time, play_time_seconds, final_trust_score, total_detections, total_warnings) VALUES (@name, @license, FROM_UNIXTIME(@connect), @playtime, @trust, @detections, @warnings)',
+        {
+            ['@name'] = playerName,
+            ['@license'] = license,
+            ['@connect'] = connectTime,
+            ['@playtime'] = playTime,
+            ['@trust'] = finalTrustScore,
+            ['@detections'] = totalDetections,
+            ['@warnings'] = totalWarnings
+        },
+        function(affectedRows)
+            if affectedRows > 0 then
+                Log("Session metrics saved for player " .. playerId, 3)
+            else
+                Log("^1Error saving session metrics for player " .. playerId .. "^7", 1)
+            end
+        end
+    )
 end
 
 
@@ -489,10 +745,12 @@ end)
 
 -- Expose necessary functions globally if needed by server_main (consider alternatives)
 -- These were previously defined in server_main or expected globally
+_G.InitializeDatabase = InitializeDatabase
 _G.LoadBanList = LoadBanList
-_G.SaveBanList = SaveBanList
+-- SaveBanList removed (DB driven)
 _G.IsPlayerBanned = IsPlayerBanned
 _G.StorePlayerBan = StorePlayerBan
+_G.BanPlayer = BanPlayer -- Expose the new BanPlayer function
 _G.IsPlayerAdmin = IsPlayerAdmin
 _G.ValidateClientHash = ValidateClientHash
 _G.GenerateSecurityToken = GenerateSecurityToken
@@ -510,7 +768,32 @@ _G.CollectPlayerMetrics = CollectPlayerMetrics
 _G.CleanupDetectionHistory = CleanupDetectionHistory
 _G.SavePlayerMetrics = SavePlayerMetrics
 _G.SendToDiscord = SendToDiscord
+-- Helper function to format duration (add this)
+function FormatDuration(totalSeconds)
+    if not totalSeconds or totalSeconds <= 0 then return "Permanent" end
+
+    local days = math.floor(totalSeconds / 86400)
+    local hours = math.floor((totalSeconds % 86400) / 3600)
+    local minutes = math.floor((totalSeconds % 3600) / 60)
+    local seconds = math.floor(totalSeconds % 60)
+
+    local parts = {}
+    if days > 0 then table.insert(parts, days .. "d") end
+    if hours > 0 then table.insert(parts, hours .. "h") end
+    if minutes > 0 then table.insert(parts, minutes .. "m") end
+    if seconds > 0 or #parts == 0 then table.insert(parts, seconds .. "s") end -- Show seconds if it's the only unit or non-zero
+
+    return table.concat(parts, " ")
+end
+_G.FormatDuration = FormatDuration -- Expose globally if needed elsewhere
+
 _G.SafeGetPlayers = SafeGetPlayers
 _G.Log = Log -- Expose Log function if needed elsewhere
 
 Log("NexusGuard globals and helpers loaded.", 2)
+
+-- Trigger initial DB load/check after globals are defined
+Citizen.CreateThread(function()
+    Citizen.Wait(500) -- Short delay to ensure Config is loaded
+    InitializeDatabase()
+end)

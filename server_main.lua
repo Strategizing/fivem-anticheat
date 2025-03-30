@@ -6,7 +6,7 @@ RegisterNetEvent('onResourceStart')
 AddEventHandler('playerConnecting', function(...) OnPlayerConnecting(...) end)
 AddEventHandler('playerDropped', function(...) OnPlayerDropped(...) end)
 AddEventHandler('explosionEvent', function(...) HandleExplosionEvent(...) end)
-AddEventHandler('entityCreated', function(...) HandleEntityCreation(...) end)
+-- AddEventHandler('entityCreated', function(...) HandleEntityCreation(...) end) -- Commented out: HandleEntityCreation is only a placeholder in globals.lua
 
 -- Local tables
 local ClientsLoaded = {}
@@ -183,12 +183,56 @@ function RegisterNexusGuardServerEvents()
         end
 
         print('^3[NexusGuard]^7 Received resource list from ' .. GetPlayerName(source) .. ' with ' .. #resources .. ' resources via ' .. _G.EventRegistry.GetEventName('SYSTEM_RESOURCE_CHECK'))
-        --[[
-            IMPLEMENTATION REQUIRED:
-            Compare the received 'resources' table against a server-defined whitelist/blacklist
-            stored in the main Config table (e.g., Config.AllowedResources = {"resource1", ...}).
-            If an unauthorized resource is found, call BanPlayer or take other appropriate action.
-        ]]
+
+        -- Resource Verification Logic
+        local rvConfig = Config and Config.Features and Config.Features.resourceVerification
+        if rvConfig and rvConfig.enabled then
+            local playerName = GetPlayerName(source)
+            local MismatchedResources = {}
+
+            if rvConfig.mode == "whitelist" then
+                local allowedSet = {}
+                for _, resName in ipairs(rvConfig.whitelist or {}) do
+                    allowedSet[resName] = true
+                end
+                -- Check client resources against whitelist
+                for _, clientRes in ipairs(resources) do
+                    if not allowedSet[clientRes] then
+                        table.insert(MismatchedResources, clientRes .. " (Not Whitelisted)")
+                    end
+                end
+            elseif rvConfig.mode == "blacklist" then
+                local disallowedSet = {}
+                for _, resName in ipairs(rvConfig.blacklist or {}) do
+                    disallowedSet[resName] = true
+                end
+                -- Check client resources against blacklist
+                for _, clientRes in ipairs(resources) do
+                    if disallowedSet[clientRes] then
+                        table.insert(MismatchedResources, clientRes .. " (Blacklisted)")
+                    end
+                end
+            end
+
+            -- Take action if mismatches found
+            if #MismatchedResources > 0 then
+                local reason = "Unauthorized resources detected: " .. table.concat(MismatchedResources, ", ")
+                Log("^1[NexusGuard] " .. playerName .. " - " .. reason .. "^7", 1)
+                if _G.SendToDiscord then _G.SendToDiscord("Resource Mismatch", playerName .. " - " .. reason) end
+
+                if rvConfig.banOnMismatch then
+                    if _G.BanPlayer then _G.BanPlayer(source, reason) end
+                elseif rvConfig.kickOnMismatch then
+                    DropPlayer(source, "Kicked due to unauthorized resources.")
+                end
+                -- Potentially add to PlayerMetrics detections as well
+                if _G.ProcessDetection then _G.ProcessDetection(source, "ResourceMismatch", {mismatched = MismatchedResources}) end
+            else
+                 Log("^2[NexusGuard] Resource check passed for " .. playerName .. "^7", 2)
+            end
+        else
+             Log("^3[NexusGuard] Resource verification is disabled in config.^7", 3)
+        end
     end)
 
     -- Client Error Handler
@@ -256,10 +300,15 @@ function ProcessDetection(playerId, detectionType, detectionData)
 
     print('^1[NexusGuard]^7 Detection: ' .. playerName .. ' (ID: '..playerId..') - Type: ' .. detectionType)
 
+    -- Store detection in database if enabled
+    if _G.StoreDetection then _G.StoreDetection(playerId, detectionType, detectionData) end
+
     -- Record detection in player's history (Uses global PlayerMetrics table)
+    -- Add extra check to ensure metrics table exists for the player
     if _G.PlayerMetrics and _G.PlayerMetrics[playerId] then
-        if not _G.PlayerMetrics[playerId].detections then _G.PlayerMetrics[playerId].detections = {} end
-        table.insert(_G.PlayerMetrics[playerId].detections, {
+        local metrics = _G.PlayerMetrics[playerId] -- Use local variable for clarity
+        if not metrics.detections then metrics.detections = {} end
+        table.insert(metrics.detections, {
             type = detectionType,
             data = detectionData,
             timestamp = os.time()
@@ -267,8 +316,10 @@ function ProcessDetection(playerId, detectionType, detectionData)
 
         -- Update trust score based on detection severity (Uses global GetDetectionSeverity)
         local severityImpact = (_G.GetDetectionSeverity and _G.GetDetectionSeverity(detectionType)) or 20
-        _G.PlayerMetrics[playerId].trustScore = math.max(0, (_G.PlayerMetrics[playerId].trustScore or 100) - severityImpact)
-        print('^3[NexusGuard]^7 Player ' .. playerName .. ' trust score updated to: ' .. _G.PlayerMetrics[playerId].trustScore)
+        metrics.trustScore = math.max(0, (metrics.trustScore or 100) - severityImpact)
+        print('^3[NexusGuard]^7 Player ' .. playerName .. ' trust score updated to: ' .. metrics.trustScore)
+    else
+        Log("^1Warning: PlayerMetrics table not found for player " .. playerId .. " during detection processing.^7", 1)
     end
 
     -- AI-based detection analysis (Uses global AI functions - PLACEHOLDERS)

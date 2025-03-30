@@ -66,5 +66,6 @@ if isServer then
             initialized = true,
             resourceName = resourceName
         }
-    })
-end
+    end -- Close the function passed to exports
+    ) -- Close the exports call
+end -- Close the if isServer block

@@ -13,8 +13,7 @@ dependency {
 shared_scripts {
     'config.lua',
     'globals.lua',
-    -- 'shared/utils.lua', -- Removed, file does not exist
-    'shared/constants.lua',
+    -- 'shared/constants.lua', -- File missing
     'shared/discord_config.lua',
     'shared/detector_registry.lua',
     'shared/config_validator.lua',
@@ -25,34 +24,29 @@ shared_scripts {
 client_scripts {
     'client_main.lua',
     'client/detectors/*.lua',
-    'client/networks/*.lua',
-    'client/ml/*.lua',
-    'client/hooks/*.lua',
+    -- 'client/networks/*.lua', -- Directory missing
+    -- 'client/ml/*.lua', -- Directory missing
+    -- 'client/hooks/*.lua', -- Directory missing
     'client/discord/*.lua'
 }
 
 server_scripts {
     '@oxmysql/lib/MySQL.lua',
     'server_main.lua',
-    'server/api/*.lua',
-    'server/detectors/*.lua',
-    'server/ml/*.lua',
-    'server/webhooks/*.lua',
-    'server/discord/*.lua',
+    -- 'server/api/*.lua', -- Directory missing
+    -- 'server/detectors/*.lua', -- Directory missing
+    -- 'server/ml/*.lua', -- Directory missing
+    -- 'server/webhooks/*.lua', -- Directory missing
+    'server/discord/bot.lua', -- Explicitly list existing file instead of wildcard
     'server/discord/commands/*.lua',
-    'server/discord/events/*.lua',
-    'server/db/*.lua',
-    'server/handlers/*.lua'
+    -- 'server/discord/events/*.lua', -- Directory missing
+    -- 'server/db/*.lua', -- Directory missing
+    -- 'server/handlers/*.lua' -- Directory missing
 }
 
 files {
-    -- 'ui/index.html', -- Removed as file doesn't exist
-    -- 'ui/css/*.css', -- Removed as file doesn't exist
-    -- 'ui/js/*.js', -- Removed as file doesn't exist
-    -- 'ui/img/*.png', -- Removed as file doesn't exist
-    -- 'ui/img/discord/*.png', -- Removed as file doesn't exist
-    'ml_models/*.json',
-    'discord_bot/config.json'
+    -- 'ml_models/*.json', -- Directory missing
+    -- 'discord_bot/config.json' -- Directory missing
 }
 
 lua54 'yes'
