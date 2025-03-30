@@ -8,7 +8,7 @@ version '0.6.9' -- Reflecting framework version
 --[[ Dependencies: Ensure these resources are started BEFORE NexusGuard ]]
 dependencies {
     'oxmysql', -- Required for database features (bans, detections, sessions) and JSON library
-    'screenshot-basic' -- Required for screenshot functionality (Config.ScreenCapture.enabled)
+    'screenshot-basic-master' -- Required for screenshot functionality (Config.ScreenCapture.enabled) -- Corrected resource name
 }
 
 shared_scripts {

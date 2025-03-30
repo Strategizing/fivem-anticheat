@@ -74,7 +74,7 @@ function Detector.Check()
         -- Get default stats (more reliable if available, otherwise use first seen)
         -- Placeholder: Ideally, load default weapon stats from a config or server event
         local defaultDamage = GetWeaponDamage(currentWeaponHash, true) -- Attempt to get default, may not work reliably
-        local defaultClipSize = GetWeaponClipSize(currentWeaponHash, true) -- Attempt to get default
+        local defaultClipSize = GetWeaponClipSize(currentWeaponHash) -- Get default clip size (only takes weaponHash)
 
         -- Initialize weapon stats in local state if not yet recorded
         if not Detector.state.weaponStats[currentWeaponHash] then

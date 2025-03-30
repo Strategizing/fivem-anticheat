@@ -84,8 +84,8 @@ function Detector.Check()
         -- Check if player is floating significantly above ground
         if distanceToGround > noclipTolerance then
             -- Check if player is in a legitimate state that might cause floating (already checked many above)
-            -- Additional checks: Swimming? Ejecting from vehicle? Specific animations?
-            if not IsPedSwimming(ped) and not IsPedEjecting(ped) then
+            -- Additional checks: Swimming? Specific animations? (Ejecting check removed as native doesn't exist and other checks cover falling/parachute)
+            if not IsPedSwimming(ped) then
 
                 -- Get vertical velocity to determine if player is stationary or moving slowly upwards/downwards in air
                 local _, _, zVelocity = table.unpack(GetEntityVelocity(ped)) -- Use table.unpack for clarity

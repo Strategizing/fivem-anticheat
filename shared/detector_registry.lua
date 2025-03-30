@@ -3,6 +3,8 @@
     Manages the registration, initialization, and execution of client-side detectors.
 ]]
 
+local isServer = IsDuplicityVersion() -- Check if running on server
+
 local DetectorRegistry = {
     detectors = {},
     activeThreads = {},
@@ -227,9 +229,10 @@ end)
 
 -- Ensure proper closing of exports block
 if isServer then
+    local resourceName = GetCurrentResourceName() -- Define resourceName here
     exports('getStatus', function()
         return {
-            version = "1.1.0",
+            version = "1.1.0", -- Consider linking this to fxmanifest version if possible later
             initialized = true,
             resourceName = resourceName
         }

@@ -10,7 +10,7 @@ local json = _G.json -- Use _G.json consistently
 local NexusGuardServer = {
     API = {},
     Config = _G.Config or {}, -- Still need access to Config loaded from config.lua
-    PlayerMetrics = _G.PlayerMetrics or {}, -- Keep global for now (Prompt 3 addresses this later)
+    -- PlayerMetrics = _G.PlayerMetrics or {}, -- REMOVED: Metrics are now handled by PlayerSessionManager in server_main and passed as arguments
     BanCache = {},
     BanCacheExpiry = 0,
     BanCacheDuration = 300, -- Cache duration in seconds (5 minutes)
@@ -23,7 +23,8 @@ local NexusGuardServer = {
     Detections = {},
     Database = {},
     Discord = {},
-    EventHandlers = {}
+    EventHandlers = {},
+    OnlineAdmins = {} -- Moved OnlineAdmins into the API table
 }
 
 -- Simple logging utility
@@ -144,16 +145,19 @@ function NexusGuardServer.Database.CleanupDetectionHistory()
     end
 end
 
-function NexusGuardServer.Database.SavePlayerMetrics(playerId)
+-- Function to save player session metrics to the database
+-- @param playerId number: The server ID of the player whose metrics should be saved.
+-- @param metrics table: The metrics data table for the player session.
+function NexusGuardServer.Database.SavePlayerMetrics(playerId, metrics) -- Added metrics parameter
     local source = tonumber(playerId)
     if not source or source <= 0 then Log("^1Error: Invalid player ID provided to SavePlayerMetrics: " .. tostring(playerId) .. "^7", 1); return end
     local dbConfig = NexusGuardServer.Config and NexusGuardServer.Config.Database
     if not dbConfig or not dbConfig.enabled then return end
-    local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[source]
-    if not metrics then Log("^1Warning: PlayerMetrics not found for player " .. source .. " on disconnect. Cannot save session.^7", 1); return end
+    -- local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[source] -- REMOVED: Using passed parameter
+    if not metrics then Log("^1Warning: Metrics data not provided for player " .. source .. " on disconnect. Cannot save session.^7", 1); return end
     if not MySQL then Log("^1Error: MySQL object not found. Cannot save session metrics for player " .. source .. ".^7", 1); return end
 
-    local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
+    local playerName = GetPlayerName(source) or ("Unknown (" .. source .. ")")
     local license = GetPlayerIdentifierByType(source, 'license')
     if not license then Log("^1Warning: Cannot save metrics for player " .. source .. " without license identifier. Skipping save.^7", 1); return end
 
@@ -489,9 +493,9 @@ end
 
 function NexusGuardServer.Detections.Process(playerId, detectionType, detectionData)
     if not playerId or playerId <= 0 or not detectionType then Log("^1[NexusGuard] Invalid arguments received by ProcessDetection.^7", 1); return end
-    local playerName = GetPlayerName(playerId) or "Unknown (" .. playerId .. ")"
+    local playerName = GetPlayerName(playerId) or ("Unknown (" .. playerId .. ")")
     local cfg = NexusGuardServer.Config
-    local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[playerId]
+    local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[playerId] -- Still need this for updating trust score etc.
 
     local dataStrForLog = (json and json.encode(detectionData)) or (type(detectionData) == "string" and detectionData or "{}")
     Log('^1[NexusGuard]^7 Detection: ' .. playerName .. ' (ID: '..playerId..') - Type: ' .. detectionType .. ' - Data: ' .. dataStrForLog .. "^7", 1)
@@ -507,7 +511,7 @@ function NexusGuardServer.Detections.Process(playerId, detectionType, detectionD
     -- Store detection (pass potentially modified detectionData)
     NexusGuardServer.Detections.Store(playerId, detectionType, detectionData)
 
-    -- Update metrics
+    -- Update metrics (Still needs the global PlayerMetrics for now)
     if metrics then
         if not metrics.detections then metrics.detections = {} end
         table.insert(metrics.detections, { type = detectionType, data = detectionData, timestamp = os.time(), serverValidated = serverValidated })
@@ -590,7 +594,7 @@ NexusGuardServer.EventHandlers = {}
 
 function NexusGuardServer.EventHandlers.HandleExplosion(sender, ev)
     local source = tonumber(sender)
-    local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[source]
+    local metrics = NexusGuardServer.PlayerMetrics and NexusGuardServer.PlayerMetrics[source] -- Still needs global PlayerMetrics
     if not source or source <= 0 or not metrics then return end
     if not ev or ev.explosionType == nil or ev.posX == nil or ev.posY == nil or ev.posZ == nil then Log("^1Warning: Received incomplete explosionEvent data from " .. source .. "^7", 1); return end
 
@@ -618,7 +622,7 @@ function NexusGuardServer.EventHandlers.HandleEntityCreation(entity)
 end
 
 function NexusGuardServer.EventHandlers.NotifyAdmins(playerId, detectionType, detectionData)
-    local playerName = GetPlayerName(playerId) or "Unknown (" .. playerId .. ")"
+    local playerName = GetPlayerName(playerId) or ("Unknown (" .. playerId .. ")")
     if not json then Log("^1[NexusGuard] JSON library not available for NotifyAdmins.^7", 1); return end
 
     local dataString = "N/A"
@@ -627,10 +631,10 @@ function NexusGuardServer.EventHandlers.NotifyAdmins(playerId, detectionType, de
 
     Log('^1[NexusGuard]^7 Admin Notify: ' .. playerName .. ' (ID: ' .. playerId .. ') - ' .. detectionType .. ' - Data: ' .. dataString .. "^7", 1)
 
-    local adminCount = 0; for _ in pairs(_G.OnlineAdmins or {}) do adminCount = adminCount + 1 end -- Still need OnlineAdmins table from server_main for now
+    local adminCount = 0; for _ in pairs(NexusGuardServer.OnlineAdmins or {}) do adminCount = adminCount + 1 end -- Use API table
     if adminCount == 0 then Log("^3[NexusGuard] No admins online to notify.^7", 3); return end
 
-    for adminId, _ in pairs(_G.OnlineAdmins or {}) do
+    for adminId, _ in pairs(NexusGuardServer.OnlineAdmins or {}) do -- Use API table
         if GetPlayerName(adminId) then
              if _G.EventRegistry then -- EventRegistry is still likely global
                  _G.EventRegistry.TriggerClientEvent('ADMIN_NOTIFICATION', adminId, {
@@ -638,7 +642,7 @@ function NexusGuardServer.EventHandlers.NotifyAdmins(playerId, detectionType, de
                     data = detectionData, timestamp = os.time()
                  })
              else Log("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot send admin notification.^7", 1) end
-        else if _G.OnlineAdmins then _G.OnlineAdmins[adminId] = nil end end -- Clean up disconnected admin
+        else if NexusGuardServer.OnlineAdmins then NexusGuardServer.OnlineAdmins[adminId] = nil end end -- Clean up disconnected admin using API table
     end
 end
 

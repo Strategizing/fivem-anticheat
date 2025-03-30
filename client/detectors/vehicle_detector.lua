@@ -71,8 +71,8 @@ end
 -- Safely report cheats to the anti-cheat system
 local function SafeReportCheat(type, details)
     -- Check if the NexusGuard object exists before using it
-    if NexusGuard and type(NexusGuard.ReportCheat) == "function" then
-        NexusGuard:ReportCheat(type, details)
+    if _G.NexusGuard and type(_G.NexusGuard.ReportCheat) == "function" then
+        _G.NexusGuard:ReportCheat(type, details)
         return true
     else
         -- Fallback to print for debugging if NexusGuard isn't available

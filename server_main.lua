@@ -18,8 +18,8 @@ AddEventHandler('explosionEvent', function(sender, ev) NexusGuardServer.EventHan
 
 -- Local tables
 local ClientsLoaded = {} -- Tracks clients that have completed the initial hash check
-local OnlineAdmins = {} -- Table to store server IDs of online admins
-_G.OnlineAdmins = OnlineAdmins -- TEMPORARY: Expose globally until PlayerMetrics/Notifications are fully refactored
+-- local OnlineAdmins = {} -- REMOVED: Now using NexusGuardServer.OnlineAdmins from API
+-- _G.OnlineAdmins = OnlineAdmins -- REMOVED: Temporary global assignment no longer needed
 
 -- Player session manager
 local PlayerSessionManager = {}
@@ -147,7 +147,8 @@ function OnPlayerConnecting(playerName, setKickReason, deferrals)
     }
 
     if isAdmin then
-        OnlineAdmins[source] = true -- Use local table, exposed via _G temporarily
+        if NexusGuardServer.OnlineAdmins then NexusGuardServer.OnlineAdmins[source] = true -- Use API table
+        else Log("^1[NexusGuard] CRITICAL: OnlineAdmins table not found in API! Cannot track admin status.^7", 1) end
         Log("^2[NexusGuard]^7 Admin connected: " .. playerName .. " (ID: " .. source .. ")", 2)
     end
 
@@ -166,7 +167,7 @@ function OnPlayerDropped(reason)
     -- Save detection data to database if enabled and metrics exist, using API
     if NexusGuardServer.Config.Database and NexusGuardServer.Config.Database.enabled and session.metrics then
         if NexusGuardServer.Database and NexusGuardServer.Database.SavePlayerMetrics then
-            NexusGuardServer.Database.SavePlayerMetrics(source)
+            NexusGuardServer.Database.SavePlayerMetrics(source, session.metrics) -- Pass session metrics data
         else
             Log("^1[NexusGuard] SavePlayerMetrics function missing from API, cannot save session for " .. playerName .. "^7", 1)
         end
@@ -174,7 +175,8 @@ function OnPlayerDropped(reason)
 
     -- Clean up player data
     if session.metrics.isAdmin then
-        OnlineAdmins[source] = nil -- Use local table
+        if NexusGuardServer.OnlineAdmins then NexusGuardServer.OnlineAdmins[source] = nil -- Use API table
+        else Log("^1[NexusGuard] CRITICAL: OnlineAdmins table not found in API! Cannot update admin status on disconnect.^7", 1) end
         Log("^2[NexusGuard]^7 Admin disconnected: " .. playerName .. " (ID: " .. source .. ") Reason: " .. reason .. "^7", 2)
     else
         Log("^2[NexusGuard]^7 Player disconnected: " .. playerName .. " (ID: " .. source .. ") Reason: " .. reason .. "^7", 2)
@@ -192,7 +194,7 @@ function RegisterNexusGuardServerEvents()
     -- Security Token Request Handler
     _G.EventRegistry.AddEventHandler('SECURITY_REQUEST_TOKEN', function(clientHash)
         local source = source; if not source or source <= 0 then return end
-        local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
+        local playerName = GetPlayerName(source) or ("Unknown (" .. source .. ")")
         if clientHash and type(clientHash) == "string" then
             ClientsLoaded[source] = true
             local tokenData = NexusGuardServer.Security and NexusGuardServer.Security.GenerateToken and NexusGuardServer.Security.GenerateToken(source)
@@ -210,7 +212,7 @@ function RegisterNexusGuardServerEvents()
     -- Detection Report Handler
     _G.EventRegistry.AddEventHandler('DETECTION_REPORT', function(detectionType, detectionData, tokenData)
         local source = source; if not source or source <= 0 then return end
-        local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
+        local playerName = GetPlayerName(source) or ("Unknown (" .. source .. ")")
         if not NexusGuardServer.Security or not NexusGuardServer.Security.ValidateToken or not NexusGuardServer.Security.ValidateToken(source, tokenData) then
             Log("^1[NexusGuard] Invalid security token received with detection report from " .. playerName .. ". Banning.^7", 1)
             if NexusGuardServer.Bans and NexusGuardServer.Bans.Execute then NexusGuardServer.Bans.Execute(source, 'Invalid security token with detection report')
@@ -224,7 +226,7 @@ function RegisterNexusGuardServerEvents()
     -- Resource Verification Handler
     _G.EventRegistry.AddEventHandler('SYSTEM_RESOURCE_CHECK', function(resources, tokenData)
         local source = source; if not source or source <= 0 then return end
-        local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
+        local playerName = GetPlayerName(source) or ("Unknown (" .. source .. ")")
         if not NexusGuardServer.Security or not NexusGuardServer.Security.ValidateToken or not NexusGuardServer.Security.ValidateToken(source, tokenData) then
             Log("^1[NexusGuard] Invalid security token received with resource check from " .. playerName .. ". Banning.^7", 1)
             if NexusGuardServer.Bans and NexusGuardServer.Bans.Execute then NexusGuardServer.Bans.Execute(source, 'Invalid security token during resource check')
@@ -265,7 +267,7 @@ function RegisterNexusGuardServerEvents()
     -- Client Error Handler
     _G.EventRegistry.AddEventHandler('SYSTEM_ERROR', function(detectionName, errorMessage, tokenData)
         local source = source; if not source or source <= 0 then return end
-        local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
+        local playerName = GetPlayerName(source) or ("Unknown (" .. source .. ")")
         if not NexusGuardServer.Security or not NexusGuardServer.Security.ValidateToken or not NexusGuardServer.Security.ValidateToken(source, tokenData) then Log("^1[NexusGuard]^7 Invalid security token in error report from " .. playerName .. ". Ignoring report.^7", 1); return end
         Log("^3[NexusGuard]^7 Client error reported by " .. playerName .. " in module '" .. detectionName .. "': " .. errorMessage .. "^7", 2)
         if NexusGuardServer.Discord and NexusGuardServer.Discord.Send then NexusGuardServer.Discord.Send("general", 'Client Error Report', "Player: " .. playerName .. " (ID: " .. source .. ")\nModule: " .. detectionName .. "\nError: " .. errorMessage, NexusGuardServer.Config.Discord.webhooks and NexusGuardServer.Config.Discord.webhooks.general) end
@@ -279,7 +281,7 @@ function RegisterNexusGuardServerEvents()
      -- Screenshot Taken Handler
      _G.EventRegistry.AddEventHandler('ADMIN_SCREENSHOT_TAKEN', function(screenshotUrl, tokenData)
         local source = source; if not source or source <= 0 then return end
-        local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
+        local playerName = GetPlayerName(source) or ("Unknown (" .. source .. ")")
         if not NexusGuardServer.Security or not NexusGuardServer.Security.ValidateToken or not NexusGuardServer.Security.ValidateToken(source, tokenData) then
              Log("^1[NexusGuard] Invalid security token received with screenshot from " .. playerName .. ". Banning.^7", 1)
              if NexusGuardServer.Bans.Execute then NexusGuardServer.Bans.Execute(source, 'Invalid security token with screenshot') else DropPlayer(source, "Anti-Cheat validation failed (Screenshot Token).") end
@@ -293,7 +295,7 @@ function RegisterNexusGuardServerEvents()
     -- Position Update Handler
     _G.EventRegistry.AddEventHandler('NEXUSGUARD_POSITION_UPDATE', function(currentPos, clientTimestamp, tokenData)
         local source = source; if not source or source <= 0 then return end
-        local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
+        local playerName = GetPlayerName(source) or ("Unknown (" .. source .. ")")
         if not NexusGuardServer.Security or not NexusGuardServer.Security.ValidateToken or not NexusGuardServer.Security.ValidateToken(source, tokenData) then Log("^1[NexusGuard] Invalid security token with position update from " .. playerName .. ". Banning.^7", 1); if NexusGuardServer.Bans.Execute then NexusGuardServer.Bans.Execute(source, 'Invalid security token with position update') else DropPlayer(source, "Anti-Cheat validation failed (Position Update Token).") end; return end
         local session = PlayerSessionManager.GetSession(source)
         if not session.metrics then Log("^1[NexusGuard] PlayerMetrics not found for " .. playerName .. " during position update.^7", 1); return end
@@ -320,7 +322,7 @@ function RegisterNexusGuardServerEvents()
     -- Health Update Handler
     _G.EventRegistry.AddEventHandler('NEXUSGUARD_HEALTH_UPDATE', function(currentHealth, currentArmor, clientTimestamp, tokenData)
         local source = source; if not source or source <= 0 then return end
-        local playerName = GetPlayerName(source) or "Unknown (" .. source .. ")"
+        local playerName = GetPlayerName(source) or ("Unknown (" .. source .. ")")
         if not NexusGuardServer.Security or not NexusGuardServer.Security.ValidateToken or not NexusGuardServer.Security.ValidateToken(source, tokenData) then Log("^1[NexusGuard] Invalid security token with health update from " .. playerName .. ". Banning.^7", 1); if NexusGuardServer.Bans.Execute then NexusGuardServer.Bans.Execute(source, 'Invalid security token with health update') else DropPlayer(source, "Anti-Cheat validation failed (Health Update Token).") end; return end
         local session = PlayerSessionManager.GetSession(source)
         if not session.metrics then Log("^1[NexusGuard] PlayerMetrics not found for " .. playerName .. " during health update.^7", 1); return end

@@ -1,9 +1,9 @@
 Config = {}
 
 -- General Settings
-Config.ServerName = "Your Server Name" -- Your server name
+Config.ServerName = "My Awesome FiveM Server" -- Your server name (You can change this later)
 Config.LogLevel = 2 -- 0=Error, 1=Warn, 2=Info, 3=Debug (Affects server console logs)
-Config.EnableDiscordLogs = true -- Enable Discord webhook logs (Separate from LogLevel)
+Config.EnableDiscordLogs = false -- Enable Discord webhook logs (Separate from LogLevel) -- DISABLED due to missing config
 Config.DiscordWebhook = "" -- Your Discord webhook URL (General logs if specific webhooks below aren't set)
 Config.BanMessage = "You have been banned for cheating. Appeal at: discord.gg/yourserver" -- Ban message
 Config.KickMessage = "You have been kicked for suspicious activity." -- Kick message
@@ -25,7 +25,7 @@ Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups considered admin b
 -- !! CRITICAL !! Change this to a long, unique, random string for your server.
 -- This is used by the default secure token implementation (HMAC-SHA256 via ox_lib).
 -- **LEAVING THIS AS DEFAULT OR USING A WEAK SECRET WILL MAKE YOUR SERVER VULNERABLE.**
-Config.SecuritySecret = "CHANGE_THIS_TO_A_VERY_LONG_RANDOM_SECRET_STRING" -- <<< CHANGE THIS!!!
+Config.SecuritySecret = "oP|ie.RXp>f'o~i&G|iAN3(4#cmTC17!#l}wcJtx;;3dGaM:8<i%hnl|16U=yI5" -- <<< UPDATED with user-provided secret
 
 -- Auto Configuration (Placeholder Features)
 Config.AutoConfig = {
@@ -39,7 +39,7 @@ Config.AutoConfig = {
 Config.Thresholds = {
     weaponDamageMultiplier = 1.5, -- Threshold for weapon damage (1.0 = normal)
     speedHackMultiplier = 1.3, -- Speed multiplier threshold (player movement)
-    teleportDistance = 100.0, -- Maximum allowed teleport distance (meters)
+    teleportDistance = 75.0, -- Maximum allowed teleport distance (meters) - Lowered slightly
     noclipTolerance = 3.0, -- NoClip detection tolerance
     vehicleSpawnLimit = 5, -- Vehicles spawned per minute
     entitySpawnLimit = 15, -- Entities spawned per minute
@@ -104,11 +104,11 @@ Config.Detectors = {
 
 -- Action Settings
 Config.Actions = {
-    kickOnSuspicion = true, -- Kick player when suspicious activity is detected
-    banOnConfirmed = true, -- Ban player when cheating is confirmed
-    warningThreshold = 3, -- Number of warnings before taking action
-    screenshotOnSuspicion = true, -- Take screenshot on suspicious activity
-    reportToAdminsOnSuspicion = true, -- Report suspicious activity to online admins
+    kickOnSuspicion = true, -- Kick player when suspicious activity is detected (Keep true)
+    banOnConfirmed = true, -- Ban player when cheating is confirmed (Keep true)
+    warningThreshold = 2, -- Number of warnings before taking action (Lowered)
+    screenshotOnSuspicion = true, -- Take screenshot on suspicious activity (Keep true)
+    reportToAdminsOnSuspicion = true, -- Report suspicious activity to online admins (Keep true)
     notifyPlayer = true, -- Notify player they are being monitored (can deter cheaters)
     progressiveResponse = true -- Gradually increase response severity with repeated offenses
 }
@@ -118,7 +118,7 @@ Config.Features = {
     -- adminPanel = true, -- Placeholder: Requires a UI and server-side logic implementation
     -- playerReports = true, -- Placeholder: Requires UI/command and server-side logic implementation
     resourceVerification = {
-        enabled = false, -- Verify integrity of client resources (EXPERIMENTAL - can cause false positives if not configured correctly)
+        enabled = false, -- Verify integrity of client resources (Keep false - Recommended)
         mode = "whitelist", -- "whitelist" or "blacklist"
         -- Whitelist Mode: ONLY resources listed here are allowed. Add ALL essential FiveM, framework (ESX, QBCore), and core server resources.
         whitelist = {
@@ -165,7 +165,7 @@ Config.Database = {
 
 -- Screen Capture Settings
 Config.ScreenCapture = {
-    enabled = true,
+    enabled = false, -- DISABLED due to missing webhookURL
     webhookURL = "", -- !! REQUIRED if enabled !! Discord webhook for screenshots
     quality = "medium", -- Screenshot quality (low, medium, high)
     includeWithReports = true, -- Include screenshots with admin reports
@@ -175,7 +175,7 @@ Config.ScreenCapture = {
 
 -- Discord Integration
 Config.Discord = {
-    enabled = true,
+    enabled = false, -- DISABLED due to missing config/implementation
     botToken = "", -- !! REQUIRED for bot features (commands, etc.) - Requires separate bot implementation !! Your Discord bot token
     guildId = "", -- !! REQUIRED for bot features !! Your Discord server ID
     botCommandPrefix = "!ac", -- Command prefix for Discord bot
