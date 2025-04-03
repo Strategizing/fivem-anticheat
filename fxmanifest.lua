@@ -60,3 +60,18 @@ provides {
     'discord_anticheat',
     'discord_richpresence'
 }
+
+
+---@diagnostic disable: undefined-global
+-- The above line tells the Lua language server to ignore undefined global warnings
+-- Or you can use:
+---@module 'globals'
+
+-- In fxmanifest.lua
+client_scripts {
+    'globals.lua', -- Load first
+    'config.lua',
+    'client_main.lua',
+    'client/discord/richpresence.lua',
+    -- other client scripts
+}
