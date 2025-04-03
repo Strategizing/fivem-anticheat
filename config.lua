@@ -1,14 +1,33 @@
 Config = {}
 
 -- General Settings
-Config.ServerName = "Your Server Name" -- Your server name
-Config.EnableDiscordLogs = true -- Enable Discord webhook logs
-Config.DiscordWebhook = "" -- Your Discord webhook URL
+Config.ServerName = "My Awesome FiveM Server" -- Your server name (You can change this later)
+Config.LogLevel = 2 -- 0=Error, 1=Warn, 2=Info, 3=Debug (Affects server console logs)
+Config.EnableDiscordLogs = false -- Enable Discord webhook logs (Separate from LogLevel) -- DISABLED due to missing config
+Config.DiscordWebhook = "" -- Your Discord webhook URL (General logs if specific webhooks below aren't set)
 Config.BanMessage = "You have been banned for cheating. Appeal at: discord.gg/yourserver" -- Ban message
 Config.KickMessage = "You have been kicked for suspicious activity." -- Kick message
-Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups that can access admin commands
 
--- Auto Configuration
+-- Permissions Framework Configuration
+-- Set this to match your server's permission system. Affects the IsPlayerAdmin check in globals.lua.
+-- Options:
+-- "ace"    : Use built-in FiveM ACE permissions (checks group.<group_name> for groups in Config.AdminGroups).
+-- "esx"    : Use ESX framework (checks xPlayer.getGroup() against Config.AdminGroups). Requires ESX to be running.
+-- "qbcore" : Use QBCore framework (checks QBCore.Functions.HasPermission(playerId, group) for groups in Config.AdminGroups). Requires QBCore to be running.
+-- "custom" : Use this if you want to write your own logic directly into the IsPlayerAdmin function in globals.lua.
+Config.PermissionsFramework = "ace" -- Default to ACE permissions
+
+Config.AdminGroups = {"admin", "superadmin", "mod"} -- Groups considered admin by the selected framework check (case-sensitive depending on framework)
+-- Example ACE groups (default): {"admin", "superadmin", "mod"}
+-- Example ESX groups: {"admin", "superadmin"}
+-- Example QBCore groups: {"admin", "god"} -- Or other high-level permission groups defined in your QBCore setup
+
+-- !! CRITICAL !! Change this to a long, unique, random string for your server.
+-- This is used by the default secure token implementation (HMAC-SHA256 via ox_lib).
+-- **LEAVING THIS AS DEFAULT OR USING A WEAK SECRET WILL MAKE YOUR SERVER VULNERABLE.**
+Config.SecuritySecret = "295BF1A78C50625D7636A7BBD65235814E028EC9C5B68E7DAD6B73702BFF08A4"
+
+-- Auto Configuration (Placeholder Features)
 Config.AutoConfig = {
     enabled = true, -- Enable auto-configuration during installation
     detectFramework = true, -- Auto-detect framework (ESX, QB, etc.)
@@ -20,15 +39,53 @@ Config.AutoConfig = {
 Config.Thresholds = {
     weaponDamageMultiplier = 1.5, -- Threshold for weapon damage (1.0 = normal)
     speedHackMultiplier = 1.3, -- Speed multiplier threshold (player movement)
-    teleportDistance = 100.0, -- Maximum allowed teleport distance (meters)
+    teleportDistance = 75.0, -- Maximum allowed teleport distance (meters) - Lowered slightly
     noclipTolerance = 3.0, -- NoClip detection tolerance
     vehicleSpawnLimit = 5, -- Vehicles spawned per minute
     entitySpawnLimit = 15, -- Entities spawned per minute
     healthRegenerationRate = 2.0, -- Health regeneration rate threshold
-    aiDecisionConfidenceThreshold = 0.75 -- AI confidence threshold for automated action
+    aiDecisionConfidenceThreshold = 0.75, -- AI confidence threshold for automated action
+
+    -- Server-Side Validation Thresholds (Used by server checks, independent of client checks)
+    serverSideSpeedThreshold = 50.0, -- Max allowed speed in m/s based on server position checks (Approx 180 km/h). Tune carefully!
+    serverSideRegenThreshold = 3.0, -- Max allowed passive HP regen rate in HP/sec based on server health checks.
+    serverSideArmorThreshold = 105.0 -- Max allowed armor value based on server health checks (Allows slight buffer over 100).
+}
+
+-- Server-Side Weapon Base Data (for validation)
+-- Add known base values for weapons here. This helps the server validate client reports.
+-- Values can vary based on game version/mods. Use natives on a clean client/server to find defaults.
+-- Key: Weapon Hash (use GetHashKey("WEAPON_PISTOL") etc.)
+Config.WeaponBaseDamage = { -- Base Damage (float)
+    [GetHashKey("WEAPON_PISTOL")] = 26.0,
+    [GetHashKey("WEAPON_COMBATPISTOL")] = 27.0,
+    [GetHashKey("WEAPON_APPISTOL")] = 28.0,
+    [GetHashKey("WEAPON_MICROSMG")] = 21.0,
+    [GetHashKey("WEAPON_SMG")] = 22.0,
+    [GetHashKey("WEAPON_ASSAULTRIFLE")] = 30.0,
+    [GetHashKey("WEAPON_CARBINERIFLE")] = 32.0,
+    [GetHashKey("WEAPON_SPECIALCARBINE")] = 34.0,
+    [GetHashKey("WEAPON_PUMPSHOTGUN")] = 30.0, -- Damage per pellet, often multiple pellets per shot
+    [GetHashKey("WEAPON_SNIPERRIFLE")] = 100.0,
+    -- Add more weapons as needed...
+}
+Config.WeaponBaseClipSize = { -- Base Clip Size (integer)
+    [GetHashKey("WEAPON_PISTOL")] = 12,
+    [GetHashKey("WEAPON_COMBATPISTOL")] = 12,
+    [GetHashKey("WEAPON_APPISTOL")] = 18,
+    [GetHashKey("WEAPON_MICROSMG")] = 16,
+    [GetHashKey("WEAPON_SMG")] = 30,
+    [GetHashKey("WEAPON_ASSAULTRIFLE")] = 30,
+    [GetHashKey("WEAPON_CARBINERIFLE")] = 30,
+    [GetHashKey("WEAPON_SPECIALCARBINE")] = 30,
+    [GetHashKey("WEAPON_PUMPSHOTGUN")] = 8,
+    [GetHashKey("WEAPON_SNIPERRIFLE")] = 10,
+    -- Add more weapons as needed...
 }
 
 -- Detection Types
+-- These flags enable/disable the *client-side* detector modules.
+-- Server-side checks (like speed, health, weapon validation) run based on received events, not these flags.
 Config.Detectors = {
     godMode = true,
     speedHack = true,
@@ -47,32 +104,50 @@ Config.Detectors = {
 
 -- Action Settings
 Config.Actions = {
-    kickOnSuspicion = true, -- Kick player when suspicious activity is detected
-    banOnConfirmed = true, -- Ban player when cheating is confirmed
-    warningThreshold = 3, -- Number of warnings before taking action
-    screenshotOnSuspicion = true, -- Take screenshot on suspicious activity
-    reportToAdminsOnSuspicion = true, -- Report suspicious activity to online admins
+    kickOnSuspicion = true, -- Kick player when suspicious activity is detected (Keep true)
+    banOnConfirmed = true, -- Ban player when cheating is confirmed (Keep true)
+    warningThreshold = 2, -- Number of warnings before taking action (Lowered)
+    screenshotOnSuspicion = true, -- Take screenshot on suspicious activity (Keep true)
+    reportToAdminsOnSuspicion = true, -- Report suspicious activity to online admins (Keep true)
     notifyPlayer = true, -- Notify player they are being monitored (can deter cheaters)
     progressiveResponse = true -- Gradually increase response severity with repeated offenses
 }
 
--- AI Settings
-Config.AI = {
-    enabled = true,
-    modelUpdateInterval = 7, -- Days between model updates
-    playerDataSampleRate = 10, -- Seconds between player data sampling
-    adaptiveDetection = true, -- Adjust thresholds based on server-wide patterns
-    anomalyDetectionStrength = 0.8, -- Sensitivity for anomaly detection (0.0-1.0)
-    clusteringEnabled = true, -- Enable behavioral clustering
-    falsePositiveProtection = true, -- Additional checks to prevent false positives
-    reportAccuracy = true -- Report detection accuracy to central database to improve model
-}
-
 -- Optional Features
 Config.Features = {
-    adminPanel = true, -- Admin panel to review detections and manage bans
-    playerReports = true, -- Allow players to report suspicious activity
-    resourceVerification = true, -- Verify integrity of server resources
+    -- adminPanel = true, -- Placeholder: Requires a UI and server-side logic implementation
+    -- playerReports = true, -- Placeholder: Requires UI/command and server-side logic implementation
+    resourceVerification = {
+        enabled = false, -- Verify integrity of client resources (Keep false - Recommended)
+        mode = "whitelist", -- "whitelist" or "blacklist"
+        -- Whitelist Mode: ONLY resources listed here are allowed. Add ALL essential FiveM, framework (ESX, QBCore), and core server resources.
+        whitelist = {
+            "chat",
+            "spawnmanager",
+            "mapmanager",
+            "basic-gamemode", -- Example core resource
+            "fivem",          -- Core resource
+            "hardcap",        -- Core resource
+            "rconlog",        -- Core resource
+            "sessionmanager", -- Core resource
+            GetCurrentResourceName(), -- Always allow the anti-cheat resource itself
+            -- !! VERY IMPORTANT !! If using whitelist mode, you MUST add ALL essential resources
+            -- for your server here. This includes your framework (e.g., 'es_extended', 'qb-core'),
+            -- maps, MLOs, core scripts (chat, spawnmanager, etc.), UI scripts, and any other
+            -- resource required for your server to function.
+            -- Failure to whitelist essential resources WILL cause players to be kicked/banned incorrectly.
+            -- Example: 'es_extended', 'qb-core', 'qb-inventory', 'ox_lib', 'ox_inventory', 'cd_drawtextui'
+        },
+        -- Blacklist Mode: Resources listed here are DISALLOWED. Useful for blocking known cheat menus.
+        blacklist = {
+            -- Add known cheat menu resource names here (case-sensitive)
+            "LambdaMenu",     -- Example
+            "SimpleTrainer",  -- Example
+            "menyoo"
+        },
+        kickOnMismatch = true, -- Kick player if unauthorized resources are detected
+        banOnMismatch = false -- Ban player if unauthorized resources are detected (Use with caution)
+    },
     performanceOptimization = true, -- Optimize detection methods based on server performance
     autoUpdate = true, -- Check for updates automatically
     compatibilityMode = false -- Enable for older servers with compatibility issues
@@ -90,8 +165,8 @@ Config.Database = {
 
 -- Screen Capture Settings
 Config.ScreenCapture = {
-    enabled = true,
-    webhookURL = "", -- Discord webhook for screenshots
+    enabled = false, -- DISABLED due to missing webhookURL
+    webhookURL = "", -- !! REQUIRED if enabled !! Discord webhook for screenshots
     quality = "medium", -- Screenshot quality (low, medium, high)
     includeWithReports = true, -- Include screenshots with admin reports
     automaticCapture = true, -- Take periodic screenshots of suspicious players
@@ -100,17 +175,17 @@ Config.ScreenCapture = {
 
 -- Discord Integration
 Config.Discord = {
-    enabled = true,
-    botToken = "", -- Your Discord bot token
-    guildId = "", -- Your Discord server ID
+    enabled = false, -- DISABLED due to missing config/implementation
+    botToken = "", -- !! REQUIRED for bot features (commands, etc.) - Requires separate bot implementation !! Your Discord bot token
+    guildId = "", -- !! REQUIRED for bot features !! Your Discord server ID
     botCommandPrefix = "!ac", -- Command prefix for Discord bot
     inviteLink = "discord.gg/yourserver", -- Discord invite link for players
-    
+
     richPresence = {
         enabled = true,
-        appId = "1234567890", -- Discord Application ID
-        largeImageKey = "logo", -- Large image key
-        smallImageKey = "shield", -- Small image key
+        appId = "1234567890", -- !! REQUIRED if enabled !! Discord Application ID (Create one at discord.com/developers/applications)
+        largeImageKey = "logo", -- Large image key (Must be uploaded to Discord App Assets)
+        smallImageKey = "shield", -- Small image key (Must be uploaded to Discord App Assets)
         updateInterval = 60, -- How often to update presence (seconds)
         showPlayerCount = true, -- Show current player count in status
         showServerName = true, -- Show server name in status
@@ -140,7 +215,7 @@ Config.Discord = {
         commands = {
             enabled = true,
             restrictToChannels = true, -- Restrict bot commands to specific channels
-            commandChannels = {"123456789"}, -- Channel IDs where commands are allowed
+            commandChannels = {"123456789"}, -- !! REQUIRED if restrictToChannels = true !! Channel IDs where commands are allowed
             available = {
                 "status", -- Get server status
                 "players", -- List online players
@@ -168,12 +243,12 @@ Config.Discord = {
             suspiciousActivity = true, -- Notify on suspicious activity
             serverStatus = true, -- Server status updates
             anticheatUpdates = true -- Anti-cheat update notifications
-        }
-        },
-        
+        } -- Closing brace for Config.Discord.bot.notifications
+        }, -- Closing brace for Config.Discord.bot
+
         webhooks = {
-            general = "", -- General anti-cheat logs
-            bans = "", -- Ban notifications
+            general = "", -- General anti-cheat logs (Can be the same as Config.DiscordWebhook)
+            bans = "", -- Ban notifications (Can be the same as Config.DiscordWebhook)
             kicks = "", -- Kick notifications
             warnings = "" -- Warning notifications
         } -- Closing brace for Config.Discord.webhooks

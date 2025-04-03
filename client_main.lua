@@ -1,363 +1,556 @@
--- client_main.lua
--- NexusGuard: Client-side anti-cheat system for FiveM
--- Provides protection against common cheating methods including god mode, 
--- weapon modification, speed hacks, teleporting, noclip, and mod menus
+--[[
+    NexusGuard Client
+    Advanced anti-cheat detection system for FiveM
+    Version: 0.6.9
+]]
 
--- Environment compatibility layer for testing outside FiveM
-if not RegisterNetEvent then
-    function RegisterNetEvent(eventName) end
-end
+-- Ensure JSON library is available (e.g., from oxmysql or another resource)
+local json = json or _G.json
 
-if not Citizen then
-    Citizen = {
-        CreateThread = function(callback) callback() end,
-        Wait = function(ms) end
+-- Safer environment detection without potentially breaking Citizen
+local isDebugEnvironment = type(Citizen) ~= "table" or type(Citizen.CreateThread) ~= "function"
+
+    -- Debug compatibility layer
+    if isDebugEnvironment then
+        print("^3[DEBUG]^7 Debug environment detected, loading compatibility layer")
+
+        -- Only create stubs if they don't exist
+        RegisterNetEvent = RegisterNetEvent or function(eventName) return eventName end
+
+        Citizen = Citizen or {
+            CreateThread = function(callback)
+                if type(callback) == "function" then callback() end
+            end,
+            Wait = function(ms) end
+        }
+
+        vector3 = vector3 or function(x, y, z)
+            local v = {x = x or 0, y = y or 0, z = z or 0}
+            -- Add metatable for vector operations and tostring
+            return setmetatable(v, {
+                __add = function(a, b) return vector3(a.x + b.x, a.y + b.y, a.z + b.z) end,
+                __sub = function(a, b) return vector3(a.x - b.x, a.y - b.y, a.z - b.z) end,
+                __unm = function(a) return vector3(-a.x, -a.y, -a.z) end,
+                __mul = function(a, b)
+                    if type(a) == "number" then
+                        return vector3(a * b.x, a * b.y, a * b.z)
+                    elseif type(b) == "number" then
+                        return vector3(a.x * b, a.y * b, a.z * b)
+                    end
+                end,
+                __len = function(a) return math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) end,
+                __tostring = function(a) return string.format("(%f, %f, %f)", a.x, a.y, a.z) end
+            })
+        end
+
+        GetGameTimer = GetGameTimer or function() return math.floor(os.clock() * 1000) end
+    end
+
+    -- Register required events using EventRegistry if available
+    -- Note: onClientResourceStart is a built-in event, doesn't need registry
+    if _G.EventRegistry then
+        _G.EventRegistry.RegisterEvent('SECURITY_RECEIVE_TOKEN')
+        _G.EventRegistry.RegisterEvent('ADMIN_NOTIFICATION') -- Used for admin alerts from server
+        _G.EventRegistry.RegisterEvent('ADMIN_REQUEST_SCREENSHOT')
+        _G.EventRegistry.RegisterEvent('NEXUSGUARD_POSITION_UPDATE') -- Register server event for position updates
+        _G.EventRegistry.RegisterEvent('NEXUSGUARD_HEALTH_UPDATE') -- Register server event for health updates
+        -- Register the local warning event name for consistency, though handled locally
+        RegisterNetEvent("NexusGuard:CheatWarning")
+    else
+        -- EventRegistry is required. If it's not found, NexusGuard may not function correctly.
+        -- Ensure 'shared/event_registry.lua' is correctly listed in 'shared_scripts' in fxmanifest.lua
+        -- and that the EventRegistry object is properly created and exposed globally (_G.EventRegistry).
+        print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Event handling will likely fail. Ensure shared scripts are loaded.^7")
+        -- Fallback registrations removed to enforce reliance on EventRegistry for consistency.
+    end
+
+    --[[
+        NexusGuard Core Class
+        Central management for all anti-cheat functionality
+    ]]
+    local NexusGuard = {
+        -- Security
+        securityToken = nil,
+
+        -- Module status tracking (potentially redundant if registry handles status)
+        moduleStatus = {},
+
+        -- Detection intervals (ms) - Used by detectors during their Initialize
+        intervals = {
+            godMode = 5000,
+            weaponModification = 3000,
+            speedHack = 2000,
+            teleport = 1000,
+            noclip = 1000,
+            menuDetection = 10000,
+            resourceMonitor = 15000
+        },
+
+        -- Player state tracking (some state might move to specific detectors)
+        state = {
+            position = vector3(0, 0, 0),
+            health = 100,
+            armor = 0,
+            lastPositionUpdate = GetGameTimer(),
+            lastTeleport = GetGameTimer(),
+            movementSamples = {},
+            weaponStats = {}
+        },
+
+        -- Alert flags
+        flags = {
+            suspiciousActivity = false,
+            warningIssued = false
+        },
+
+        -- Discord rich presence
+        richPresence = {
+            appId = nil,
+            updateInterval = 60000,
+            serverName = "Protected Server",
+            lastUpdate = 0
+        },
+
+        -- Resource monitoring (state handled by detector)
+        resources = {
+            lastCheck = 0,
+            whitelist = {}
+        },
+
+        -- System state
+        initialized = false
+        -- Note: Version is defined in fxmanifest.lua
     }
-end
 
-if not vector3 then
-    vector3 = function(x, y, z)
-        return {x = x or 0, y = y or 0, z = z or 0}
-    end
-end
-
-if not GetGameTimer then
-    GetGameTimer = function()
-        if type(GetTickCount64) == "function" then
-            return GetTickCount64()
-        elseif type(_G["GetTickCount"]) == "function" then
-            return _G["GetTickCount"]()
-        else
-            return os.clock() * 1000 -- Fallback to Lua's os.clock (seconds) converted to ms
+    -- Pass NexusGuard instance to detectors
+    NexusGuard.RegisterDetectors = function()
+        local detectors = {
+            "godmode_detector",
+            "menudetection_detector",
+            -- ...other detectors...
+        }
+        for _, detector in ipairs(detectors) do
+            local detectorModule = require("client/detectors/" .. detector)
+            detectorModule.Initialize(NexusGuard)
         end
     end
-end
 
-RegisterNetEvent('onClientResourceStart')
+    --[[
+        Safe Detection Wrapper
+        Wraps detection methods with error handling to prevent crashes
+        (Called by DetectorRegistry's CreateDetectorThread)
+    ]]
+    function NexusGuard:SafeDetect(detectionFn, detectionName)
+        local success, err = pcall(detectionFn) -- Call the detector's Check function directly
 
--- Main NexusGuard object with all configuration and state
-local NexusGuard = {
-    securityToken = nil,
-    moduleStatus = {},
-    scanIntervals = {
-        godMode = 5000,
-        weaponModification = 3000,
-        speedHack = 2000,
-        teleport = 1000,
-        noclip = 1000,
-        menuDetection = 10000,
-        resourceMonitor = 15000
-    },
-    playerState = {
-        position = vector3(0, 0, 0),
-        health = 100,
-        armor = 0,
-        lastTeleport = GetGameTimer(),
-        movementSamples = {},
-        weaponStats = {}
-    },
-    flags = {
-        suspiciousActivity = false,
-        warningIssued = false
-    },
-    discordRichPresence = {
-        appId = nil, -- Will be populated from Config
-        updateInterval = 60000, -- Update Discord status every 60 seconds
-        serverName = "Protected Server",
-        lastUpdate = 0
-    },
-    lastResourceCheck = 0,
-    initialized = false
-}
+        if not success then
+            print("^1[NexusGuard]^7 Error in " .. detectionName .. " detection: " .. tostring(err))
 
--- Initialize client-side anti-cheat
-Citizen.CreateThread(function()
-    Citizen.Wait(1000) -- Wait for the resource's scripts to load
-    
-    -- Wait for network session to be active
-    while not NetworkIsSessionActive() do
-        Citizen.Wait(100)
-    end
-    
-    print('[NexusGuard] Initializing client-side protection...')
-    
-    -- Generate client hash for verification
-    local clientHash = GetCurrentResourceName() .. "-" .. math.random(100000, 999999)
-    
-    -- Request security token from server
-    TriggerServerEvent('NexusGuard:RequestSecurityToken', clientHash)
-    
-    Citizen.Wait(2000) -- Allow time for token receipt
-    
-    -- Start all protection modules
-    StartProtectionModules()
-    
-    NexusGuard.initialized = true
-end)
-
--- Start all protection modules with optimized scheduling
-function StartProtectionModules()
-    Citizen.CreateThread(function()
-        while true do
-            Citizen.Wait(1000) -- Base check interval
-            
-            if not Config or not Config.Detectors or not NexusGuard.initialized then
-                Citizen.Wait(1000)
-                goto continue
+            -- Report critical errors to server if they occur frequently
+            if not self.errors then self.errors = {} end
+            if not self.errors[detectionName] then
+                self.errors[detectionName] = {count = 0, firstSeen = GetGameTimer()}
             end
-            
-            local currentTime = GetGameTimer()
-            
-            -- Run each detector based on its configured interval
-            if Config.Detectors.godMode then DetectGodMode() end
-            if Config.Detectors.weaponModification then DetectWeaponModification() end
-            if Config.Detectors.speedHack then DetectSpeedHack() end
-            if Config.Detectors.teleporting then DetectTeleport() end
-            if Config.Detectors.noclip then DetectNoClip() end
-            if Config.Detectors.menuDetection then DetectModMenus() end
-            
-            -- Resource monitoring runs less frequently
-            if Config.Detectors.resourceInjection and 
-               (currentTime - NexusGuard.lastResourceCheck > NexusGuard.scanIntervals.resourceMonitor) then
-                MonitorResources()
-                NexusGuard.lastResourceCheck = currentTime
+
+            self.errors[detectionName].count = self.errors[detectionName].count + 1
+
+            -- If errors persist, notify server
+            if self.errors[detectionName].count > 5 and
+               GetGameTimer() - self.errors[detectionName].firstSeen < 60000 then
+                if self.securityToken then -- Check if token exists (should be a table now)
+                    -- Use EventRegistry if available
+                    if _G.EventRegistry then
+                        -- Send the error details and the security token table
+                        _G.EventRegistry.TriggerServerEvent('SYSTEM_ERROR', detectionName, tostring(err), self.securityToken)
+                    else
+                        -- TriggerServerEvent("NexusGuard:ClientError", detectionName, tostring(err), self.securityToken) -- Fallback removed
+                        print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot report client error to server.^7")
+                    end
+                end
+
+                -- Reset error counter to prevent spam
+                self.errors[detectionName].count = 0
+                self.errors[detectionName].firstSeen = GetGameTimer()
             end
-            
-            ::continue::
         end
-    end)
-    
-    InitializeRichPresence()
-end
-
--- God mode detection: Checks for invincibility and abnormal health values
-function DetectGodMode()
-    local player = PlayerId()
-    local ped = PlayerPedId()
-    local health = GetEntityHealth(ped)
-    local maxHealth = GetPedMaxHealth(ped)
-    
-    -- Check for invincibility flag
-    if GetPlayerInvincible(player) then
-        ReportCheat("godmode", "Player has invincibility enabled")
-        return
     end
-    
-    -- Check for abnormal health values
-    if health > maxHealth then
-        ReportCheat("godmode", "Player has abnormal health: " .. health .. "/" .. maxHealth)
-    end
-    
-    NexusGuard.playerState.health = health
-end
 
--- Weapon modification detection: Checks for modified weapon damage and clip size
-function DetectWeaponModification()
-    local ped = PlayerPedId()
-    local weaponHash = GetSelectedPedWeapon(ped)
-    
-    -- Only check if player has a weapon equipped
-    if weaponHash ~= GetHashKey("WEAPON_UNARMED") then
-        local damage = GetWeaponDamage(weaponHash, 0)
-        local clipSize = GetWeaponClipSize(weaponHash)
-        
-        -- Initialize weapon stats if not yet recorded
-        if not NexusGuard.playerState.weaponStats[weaponHash] then
-            NexusGuard.playerState.weaponStats[weaponHash] = {
-                damage = damage,
-                clipSize = clipSize
-            }
+    --[[
+        Core Anti-Cheat Initialization
+    ]]
+    function NexusGuard:Initialize()
+        -- Prevent duplicate initialization
+        if self.initialized then return end
+
+        Citizen.CreateThread(function()
+            -- Wait for scripts to load (Config, Registry etc.)
+            Citizen.Wait(1000)
+
+            -- Wait for network session to become active
+            local sessionStartTime = GetGameTimer()
+            local timeout = 30000 -- 30 second timeout
+
+            while not NetworkIsSessionActive() do
+                Citizen.Wait(100)
+                -- Check for timeout
+                if GetGameTimer() - sessionStartTime > timeout then
+                    print("^1[NexusGuard]^7 Warning: NetworkIsSessionActive() timed out")
+                    break
+                end
+            end
+
+            print('^2[NexusGuard]^7 Initializing protection system...')
+
+            -- Generate unique client hash for verification (Note: This hash isn't securely validated currently)
+            local clientHash = GetCurrentResourceName() .. "-" .. math.random(100000, 999999)
+
+            -- Request security token from server
+            if _G.EventRegistry then
+                _G.EventRegistry.TriggerServerEvent('SECURITY_REQUEST_TOKEN', clientHash)
+            else
+                TriggerServerEvent('NexusGuard:RequestSecurityToken', clientHash) -- Fallback
+            end
+
+            -- Allow time for token receipt
+            Citizen.Wait(2000)
+
+            -- Start auxiliary protection modules (like Rich Presence)
+            -- Detectors are started automatically via their registration block in detector_registry.lua
+            self:StartProtectionModules()
+
+            -- Pass the NexusGuard instance to the registry
+            if _G.DetectorRegistry and _G.DetectorRegistry.SetNexusGuardInstance then
+                _G.DetectorRegistry:SetNexusGuardInstance(self) -- Pass the NexusGuard instance (self)
+                -- Trigger the registry to start enabled detectors now that the instance is set
+                if _G.DetectorRegistry.StartEnabledDetectors then
+                    Citizen.CreateThread(function()
+                        Citizen.Wait(100) -- Short delay to ensure detectors are registered
+                        _G.DetectorRegistry:StartEnabledDetectors()
+                    end)
+                else
+                    print("^1[NexusGuard] CRITICAL: DetectorRegistry.StartEnabledDetectors not found! Detectors will not auto-start.^7")
+                end
+            else
+                print("^1[NexusGuard] CRITICAL: DetectorRegistry or SetNexusGuardInstance not found! Detectors cannot be started.^7")
+            end
+
+            -- Start periodic position and health update thread
+            Citizen.CreateThread(function()
+                local positionUpdateInterval = 5000 -- ms (e.g., every 5 seconds)
+                while true do
+                    Citizen.Wait(positionUpdateInterval)
+                    -- Only send updates if initialized and token is valid
+                    if self.initialized and self.securityToken and type(self.securityToken) == "table" then
+                        self:SendPositionUpdate()
+                        self:SendHealthUpdate() -- Add health update call
+                    end
+                end
+            end)
+            print('^2[NexusGuard]^7 Position update thread started.')
+
+            self.initialized = true
+            print('^2[NexusGuard]^7 Core protection system initialized')
+        end) -- Add missing end for Citizen.CreateThread
+    end
+
+    --[[
+        Protection Module Management
+        Initializes features like Rich Presence. Detectors are now self-managed via DetectorRegistry.
+    ]]
+    function NexusGuard:StartProtectionModules()
+        print("^2[NexusGuard]^7 Starting auxiliary modules (e.g., Rich Presence)...")
+        self:InitializeRichPresence()
+        -- Other non-detector modules could be started here
+        print("^2[NexusGuard]^7 Auxiliary modules initialization process completed.")
+    end
+
+    --[[
+        Rich Presence Management
+        Handles Discord integration
+    ]]
+    function NexusGuard:InitializeRichPresence()
+        -- Ensure Config and necessary sub-tables exist
+        if not Config or not Config.Discord or not Config.Discord.RichPresence then
+            print("^3[NexusGuard] Rich Presence configuration missing or incomplete. Skipping initialization.^7")
             return
         end
-        
-        -- Compare with previously stored values
-        local storedStats = NexusGuard.playerState.weaponStats[weaponHash]
-        
-        if damage > storedStats.damage * 1.5 then
-            ReportCheat("weaponmod", "Weapon damage modified: " .. damage .. 
-                        " (Expected: " .. storedStats.damage .. ")")
-        end
-        
-        if clipSize > storedStats.clipSize * 2 then
-            ReportCheat("weaponmod", "Weapon clip size modified: " .. clipSize .. 
-                        " (Expected: " .. storedStats.clipSize .. ")")
-        end
-    end
-end
 
--- Speed hack detection: Checks for abnormal vehicle or player movement speeds
-function DetectSpeedHack()
-    local ped = PlayerPedId()
-    local vehicle = GetVehiclePedIsIn(ped, false)
-    
-    if vehicle ~= 0 then
-        -- Vehicle speed check
-        local speed = GetEntitySpeed(vehicle)
-        local model = GetEntityModel(vehicle)
-        local maxSpeed = GetVehicleModelMaxSpeed(model)
-        
-        if speed > maxSpeed * 1.5 then
-            local kmhSpeed = math.floor(speed * 3.6)
-            local kmhMaxSpeed = math.floor(maxSpeed * 3.6)
-            ReportCheat("speedhack", "Vehicle speed abnormal: " .. kmhSpeed .. 
-                        " km/h (Max: " .. kmhMaxSpeed .. " km/h)")
+        local rpConfig = Config.Discord.RichPresence
+        if not rpConfig.Enabled then
+            print("^3[NexusGuard] Rich Presence disabled in config.^7")
+            return
         end
-    else
-        -- On-foot speed check
-        local speed = GetEntitySpeed(ped)
-        if speed > 10.0 and not IsPedInParachuteFreeFall(ped) then
-            ReportCheat("speedhack", "Player movement speed abnormal: " .. 
-                        math.floor(speed * 3.6) .. " km/h")
-        end
-    end
-end
 
--- Teleport detection: Checks for sudden position changes that aren't possible normally
-function DetectTeleport()
-    local ped = PlayerPedId()
-    local currentPos = GetEntityCoords(ped)
-    local lastPos = NexusGuard.playerState.position
-    local currentTime = GetGameTimer()
-    
-    -- Only check if we have a valid previous position
-    if lastPos.x ~= 0 or lastPos.y ~= 0 or lastPos.z ~= 0 then
-        local distance = #(currentPos - lastPos)
-        local timeDiff = currentTime - NexusGuard.playerState.lastTeleport
-        
-        -- If player moved more than 100 meters in less than 1 second without being in a vehicle
-        if distance > 100.0 and timeDiff < 1000 and GetVehiclePedIsIn(ped, false) == 0 then
-            -- Ignore legitimate teleports (game loading screens, etc)
-            if not IsPlayerSwitchInProgress() and not IsScreenFadedOut() then
-                ReportCheat("teleport", "Possible teleport detected: " .. 
-                            math.floor(distance) .. " meters in " .. timeDiff .. "ms")
+        if not rpConfig.AppId or rpConfig.AppId == "" or rpConfig.AppId == "1234567890" then
+            print("^1[NexusGuard] Rich Presence enabled but AppId is missing, empty, or default in config. Rich Presence will not function.^7")
+            return -- Don't start update thread if AppId is invalid
+        end
+
+        -- Set AppId only if valid
+        SetDiscordAppId(rpConfig.AppId)
+        print("^2[NexusGuard] Rich Presence AppId set: " .. rpConfig.AppId .. "^7")
+
+        -- Set up presence update thread
+        Citizen.CreateThread(function()
+            while true do
+                -- Check config again inside loop in case it changes dynamically or resource restarts
+                local currentRpConfig = Config and Config.Discord and Config.Discord.RichPresence
+                -- Also check if AppId is still valid (in case config was reloaded badly)
+                if not currentRpConfig or not currentRpConfig.Enabled or not currentRpConfig.AppId or currentRpConfig.AppId == "" or currentRpConfig.AppId == "1234567890" then
+                    print("^3[NexusGuard] Rich Presence disabled or AppId invalid, stopping update thread.^7")
+                    ClearDiscordPresence() -- Clear presence if disabled
+                    break -- Exit the loop
+                end
+
+                -- Update presence only if enabled and AppId is valid
+                self:UpdateRichPresence()
+                local interval = (currentRpConfig.UpdateInterval or 60) * 1000
+                Citizen.Wait(interval)
             end
-        end
+        end)
+        print("^2[NexusGuard] Rich Presence update thread started.^7")
     end
-    
-    -- Update player state
-    NexusGuard.playerState.position = currentPos
-    NexusGuard.playerState.lastTeleport = currentTime
-end
 
--- NoClip detection: Checks for floating without proper game state
-function DetectNoClip()
-    local ped = PlayerPedId()
-    
-    -- Only check if player is not in a vehicle and not dead
-    if GetVehiclePedIsIn(ped, false) == 0 and not IsEntityDead(ped) then
-        local pos = GetEntityCoords(ped)
-        local ground, groundZ = GetGroundZFor_3dCoord(pos.x, pos.y, pos.z, false)
-        
-        -- Check if player is floating and not in a legitimate falling state
-        if not ground and not IsPedInParachuteFreeFall(ped) and 
-           not IsPedFalling(ped) and not IsPedJumpingOutOfVehicle(ped) then
-            
-            local _, _, zSpeed = GetEntityVelocity(ped)
-            zSpeed = zSpeed or 0  -- Default to 0 if zSpeed is nil
-            
-            -- If player is floating and not moving vertically (not falling)
-            if math.abs(zSpeed) < 0.1 then
-                local collisionDisabled = GetEntityCollisionDisabled(ped)
-                if collisionDisabled then
-                    ReportCheat("noclip", "NoClip detected: Collision disabled and floating")
+    --[[
+        Update Rich Presence
+        Updates Discord status with player info
+    ]]
+    function NexusGuard:UpdateRichPresence()
+        -- Re-check config validity within the update function itself
+        if not Config or not Config.Discord or not Config.Discord.RichPresence then return end
+        local rpConfig = Config.Discord.RichPresence
+        if not rpConfig.Enabled or not rpConfig.AppId or rpConfig.AppId == "" or rpConfig.AppId == "1234567890" then return end
+
+        -- Clear previous actions before setting new ones
+        ClearDiscordPresenceAction(0)
+        ClearDiscordPresenceAction(1)
+
+        -- Set rich presence assets if configured
+        if rpConfig.largeImageKey and rpConfig.largeImageKey ~= "" then
+            SetDiscordRichPresenceAsset(rpConfig.largeImageKey)
+            SetDiscordRichPresenceAssetText(rpConfig.LargeImageText or "") -- Use configured text or empty string
+        else
+            ClearDiscordRichPresenceAsset() -- Clear asset if not configured
+        end
+        if rpConfig.smallImageKey and rpConfig.smallImageKey ~= "" then
+            SetDiscordRichPresenceAssetSmall(rpConfig.smallImageKey)
+            SetDiscordRichPresenceAssetSmallText(rpConfig.SmallImageText or "") -- Use configured text or empty string
+        else
+            ClearDiscordRichPresenceAssetSmall() -- Clear small asset if not configured
+        end
+
+        -- Set action buttons
+        if rpConfig.buttons then
+            for i, button in ipairs(rpConfig.buttons) do
+                if button.label and button.label ~= "" and button.url and button.url ~= "" and i <= 2 then -- Discord allows max 2 buttons
+                    SetDiscordRichPresenceAction(i - 1, button.label, button.url)
                 end
             end
         end
+
+        -- Set rich presence text
+        local playerName = GetPlayerName(PlayerId())
+        local serverId = GetPlayerServerId(PlayerId())
+        local ped = PlayerPedId()
+        local health = GetEntityHealth(ped) - 100 -- Assuming 100 is base health
+        if health < 0 then health = 0 end
+
+        local coords = GetEntityCoords(ped)
+        local streetHash, _ = GetStreetNameAtCoord(coords.x, coords.y, coords.z)
+        local streetName = (streetHash ~= 0 and GetStreetNameFromHashKey(streetHash)) or "Unknown Location"
+
+        -- Format presence text (Example - Consider making this configurable)
+        local details = string.format("ID: %s | HP: %s%%", serverId, health) -- Top line
+        local state = string.format("%s | %s", playerName, streetName) -- Bottom line
+
+        -- Use SetDiscordRichPresence() for details and SetDiscordRichPresenceState() for state
+        SetDiscordRichPresence(details)
+        SetDiscordRichPresenceState(state)
     end
-end
 
--- Mod menu detection: Checks for common mod menu indicators
-function DetectModMenus()
-    -- Check for common mod menu key combinations
-    if IsControlJustPressed(0, 178) and IsControlJustPressed(0, 51) then
-        -- HOME key + E key common mod menu combo
-        ReportCheat("modmenu", "Potential mod menu key combination detected")
+    --[[
+        Send Position Update
+        Sends current player position to the server for validation
+    ]]
+    function NexusGuard:SendPositionUpdate()
+        -- Skip if not initialized or no security token
+        if not self.initialized or not self.securityToken or type(self.securityToken) ~= "table" then
+            -- print("^3[NexusGuard] SendPositionUpdate skipped: Not initialized or no valid security token.^7") -- Reduce log spam
+            return
+        end
+
+        local ped = PlayerPedId()
+        if not DoesEntityExist(ped) then return end
+
+        local currentPos = GetEntityCoords(ped)
+        local currentTimestamp = GetGameTimer() -- Use game timer for consistency
+
+        -- Send position data and token table to server
+        if _G.EventRegistry then
+            _G.EventRegistry.TriggerServerEvent('NEXUSGUARD_POSITION_UPDATE', currentPos, currentTimestamp, self.securityToken)
+        else
+            print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot send position update to server.^7")
+        end
     end
-    
-    -- Note: Real mod menu detection would need more sophisticated methods
-    -- This is a simplified placeholder implementation
-end
 
--- Resource monitoring: Checks for injected/unauthorized resources
-function MonitorResources()
-    -- Get all currently running resources
-    local resources = {}
-    local resourceCount = GetNumResources()
-    
-    for i = 0, resourceCount - 1 do
-        local resourceName = GetResourceByFindIndex(i)
-        table.insert(resources, resourceName)
+    --[[
+        Send Health Update
+        Sends current player health and armor to the server for validation
+    ]]
+    function NexusGuard:SendHealthUpdate()
+        -- Skip if not initialized or no security token
+        if not self.initialized or not self.securityToken or type(self.securityToken) ~= "table" then
+            return
+        end
+
+        local ped = PlayerPedId()
+        if not DoesEntityExist(ped) then return end
+
+        local currentHealth = GetEntityHealth(ped)
+        local currentArmor = GetPedArmour(ped)
+        local currentTimestamp = GetGameTimer()
+
+        -- Send health/armor data and token table to server
+        if _G.EventRegistry then
+            _G.EventRegistry.TriggerServerEvent('NEXUSGUARD_HEALTH_UPDATE', currentHealth, currentArmor, currentTimestamp, self.securityToken)
+        else
+            print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot send health update to server.^7")
+        end
     end
-    
-    -- Send to server for verification against whitelist
-    TriggerServerEvent("NexusGuard:VerifyResources", resources)
-end
 
--- Discord Rich Presence initialization (placeholder)
-function InitializeRichPresence()
-    -- Placeholder - would be implemented based on Discord API
-end
+    --[[
+        Cheat Reporting (Called by Detectors)
+        Sends detection info to server
+    ]]
+    function NexusGuard:ReportCheat(type, details)
+        -- Skip if not initialized or no security token (token should be a table)
+        if not self.initialized or not self.securityToken or type(self.securityToken) ~= "table" then
+            print("^3[NexusGuard] ReportCheat skipped: Not initialized or no valid security token.^7")
+            return
+        end
 
--- Report detected cheats to the server
-function ReportCheat(type, details)
-    if not NexusGuard.initialized or not NexusGuard.securityToken then 
-        return
-    end
-    
-    if not NexusGuard.flags.warningIssued then
-        -- First detection issues a warning
-        NexusGuard.flags.suspiciousActivity = true
-        NexusGuard.flags.warningIssued = true
-        
-        TriggerEvent("NexusGuard:CheatWarning", type, details)
-    else
-        -- Subsequent detections report to server
-        TriggerServerEvent("NexusGuard:ReportCheat", type, details, NexusGuard.securityToken)
-    end
-end
-
--- Event handlers
-RegisterNetEvent("NexusGuard:ReceiveSecurityToken")
-AddEventHandler("NexusGuard:ReceiveSecurityToken", function(token)
-    NexusGuard.securityToken = token
-    print("[NexusGuard] Security handshake completed")
-end)
-
-RegisterNetEvent("nexusguard:initializeClient")
-AddEventHandler("nexusguard:initializeClient", function(token)
-    NexusGuard.securityToken = token
-    print("[NexusGuard] Client initialized via alternate event")
-end)
-
-RegisterNetEvent("NexusGuard:CheatWarning")
-AddEventHandler("NexusGuard:CheatWarning", function(type, details)
-    TriggerEvent('chat:addMessage', {
-        color = { 255, 0, 0 },
-        multiline = true,
-        args = { 
-            "[NexusGuard]", 
-            "Suspicious activity detected! Type: " .. type .. 
-            ". Further violations will result in automatic ban." 
-        }
-    })
-end)
-
-RegisterNetEvent("nexusguard:requestScreenshot")
-AddEventHandler("nexusguard:requestScreenshot", function()
-    if not NexusGuard.initialized or not exports['screenshot-basic'] then 
-        return 
-    end
-    
-    exports['screenshot-basic']:requestScreenshotUpload(
-        Config.ScreenCapture.webhookURL, 
-        'files[]', 
-        function(data)
-            local resp = json.decode(data)
-            if resp and resp.attachments and resp.attachments[1] then
-                TriggerServerEvent('nexusguard:screenshotTaken', 
-                                   resp.attachments[1].url, 
-                                   NexusGuard.securityToken)
+        -- First detection issues a local warning
+        if not self.flags.warningIssued then
+            self.flags.suspiciousActivity = true
+            self.flags.warningIssued = true
+            -- Trigger local warning event
+            TriggerEvent("NexusGuard:CheatWarning", type, details)
+        else
+            -- Report subsequent detections to server, sending the token table
+            if _G.EventRegistry then
+                _G.EventRegistry.TriggerServerEvent('DETECTION_REPORT', type, details, self.securityToken)
+            else
+                -- EventRegistry is required for server communication.
+                print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot report detection to server.^7")
             end
         end
-    )
-end)
+    end
+
+    --[[
+        Event Handlers
+    ]]
+    -- Use EventRegistry for handlers where possible
+    local receiveTokenEvent = (_G.EventRegistry and _G.EventRegistry.GetEventName('SECURITY_RECEIVE_TOKEN')) -- No fallback needed
+    if receiveTokenEvent then
+        AddEventHandler(receiveTokenEvent, function(tokenData)
+            -- Expecting a table { timestamp = ..., signature = ... }
+            if not tokenData or type(tokenData) ~= "table" or not tokenData.timestamp or not tokenData.signature then
+                print("^1[NexusGuard] Received invalid security token data structure from server.^7")
+                -- Consider requesting again or handling error
+                return
+            end
+            NexusGuard.securityToken = tokenData -- Store the entire table
+            print("^2[NexusGuard] Security handshake completed via " .. receiveTokenEvent .. "^7")
+        end)
+    else
+        print("^1[NexusGuard] CRITICAL: Could not get event name for SECURITY_RECEIVE_TOKEN from EventRegistry.^7")
+    end
+
+    -- Handler for the local warning event (doesn't need registry)
+    AddEventHandler("NexusGuard:CheatWarning", function(type, details)
+        -- Use chat resource if available and configured
+        if Config and Config.Actions and Config.Actions.notifyPlayer and exports.chat then
+            -- Ensure details is a string or convert it safely
+            local detailStr = type(details) == "table" and (json and json.encode(details) or "details") or tostring(details or "details")
+            exports.chat:addMessage({
+                color = { 255, 0, 0 }, -- Red
+                multiline = true,
+                args = {
+                    "[NexusGuard Warning]",
+                    "Suspicious activity detected! Type: ^*" .. type .. "^r. Details: ^*" .. detailStr .. "^r. Further violations may result in action."
+                }
+            })
+        elseif Config and Config.Actions and Config.Actions.notifyPlayer then
+            -- Fallback print if chat resource isn't available but notification is enabled
+            print("^1[NexusGuard Warning] Suspicious activity detected! Type: " .. type .. ". Further violations may result in action.^7")
+        end
+        -- Note: This warning is purely client-side informational based on the first ReportCheat call.
+    end)
+
+    -- Handler for screenshot request from server
+    local requestScreenshotEvent = (_G.EventRegistry and _G.EventRegistry.GetEventName('ADMIN_REQUEST_SCREENSHOT')) or "nexusguard:requestScreenshot"
+    AddEventHandler(requestScreenshotEvent, function()
+        if not NexusGuard.initialized then print("^3[NexusGuard] Screenshot requested but core is not initialized.^7") return end
+
+        -- Check if screenshot feature and dependency are enabled/available
+        if not Config or not Config.ScreenCapture or not Config.ScreenCapture.enabled then
+            print("^3[NexusGuard] Screenshot requested but feature is disabled in config.^7")
+            return
+        end
+        if not exports['screenshot-basic'] then
+            print("^1[NexusGuard] Screenshot requested but 'screenshot-basic' resource/export not found. Ensure it's started.^7")
+            return
+        end
+
+        -- Ensure webhookURL is configured
+        local webhookURL = Config.ScreenCapture.webhookURL
+        if not webhookURL or webhookURL == "" then
+            print("^1[NexusGuard] Screenshot requested but Config.ScreenCapture.webhookURL is not configured.^7")
+            return
+        end
+
+        -- Take screenshot and send to webhook
+        exports['screenshot-basic']:requestScreenshotUpload(
+            webhookURL,
+            'files[]', -- Standard field name for screenshot-basic uploads
+            function(data)
+                if not data then
+                    print("^1[NexusGuard] Screenshot upload failed (no data returned). Check webhook URL and resource status.^7")
+                    return
+                end
+
+                -- Ensure JSON library is available for decoding the response
+                if not json then
+                    print("^1[NexusGuard] JSON library not available for screenshot callback. Cannot process response.^7")
+                    return
+                end
+
+                local success, resp = pcall(json.decode, data)
+                if success and resp and resp.attachments and resp.attachments[1] and resp.attachments[1].url then
+                    local screenshotUrl = resp.attachments[1].url
+                    print("^2[NexusGuard] Screenshot uploaded successfully: " .. screenshotUrl .. "^7")
+                    -- Report screenshot taken back to server, sending the token table
+                    if _G.EventRegistry then
+                        _G.EventRegistry.TriggerServerEvent('ADMIN_SCREENSHOT_TAKEN', screenshotUrl, NexusGuard.securityToken)
+                    else
+                        print("^1[NexusGuard] CRITICAL: _G.EventRegistry not found. Cannot report screenshot taken to server.^7")
+                    end
+                else
+                    -- Log the raw response if decoding fails or structure is unexpected
+                    print("^1[NexusGuard] Failed to decode screenshot response or response structure invalid. Raw response: " .. tostring(data) .. "^7")
+                    -- Optionally report failure back to server
+                    -- TriggerServerEvent('nexusguard:screenshotFailed', NexusGuard.securityToken)
+                end
+            end
+        )
+        print("^2[NexusGuard] Screenshot requested and upload initiated.^7")
+    end)
+
+    -- Initialize on resource start
+    AddEventHandler('onClientResourceStart', function(resourceName)
+        if GetCurrentResourceName() ~= resourceName then return end
+        -- Allow Config and other shared scripts to load first
+        Citizen.Wait(500)
+        NexusGuard:Initialize()
+        NexusGuard.RegisterDetectors()
+    end)

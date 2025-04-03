@@ -2,6 +2,47 @@
     "Lua.diagnostics.globals": [
         "GetTickCount64",
         "GetTickCount",
-        "Config"
-    ]
+        "Config",
+        "vector3",
+        "GetPlayerPed", 
+        "PlayerId", 
+        "PlayerPedId", 
+        "GetEntityCoords", 
+        "GetEntityHealth", 
+        "GetPedArmour", 
+        "NetworkIsSessionActive", 
+        "GetCurrentResourceName", 
+        "GetNumResources", 
+        "GetResourceByFindIndex",
+        "GetPlayers",
+        "GetPlayerName",
+        "exports",
+        "TriggerServerEvent",
+        "TriggerClientEvent",
+        "AddEventHandler",
+        "RegisterNetEvent",
+        "Citizen",
+        "ESX",
+        "QBCore",
+        "LoadResourceFile",
+        "SaveResourceFile",
+        "GetPlayerEndpoint",
+        "GetPlayerIdentifierByType",
+        "DropPlayer",
+        "IsPlayerAceAllowed",
+        "GetConvar",
+        "PerformHttpRequest"
+    ],
+    "Lua.runtime.version": "Lua 5.4",
+    "Lua.telemetry.enable": false,
+    "Lua.workspace.library": [
+        "${3rd}/luasocket/library"
+    ],
+    "Lua.debug.autoOpenDebugRuntimeError": true,
+    "Lua.debug.loadPreCompiled": true,
+    "Lua.diagnostics.disable": [
+        "undefined-global",
+        "lowercase-global"
+    ],
+    "Lua.workspace.checkThirdParty": false
 }

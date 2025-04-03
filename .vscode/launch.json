@@ -4,11 +4,12 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+    
         {
             "type": "LuaHelper-Debug",
             "request": "launch",
             "name": "LuaHelper-DebugFile",
-            "description": "独立文件调试模式",
+            "description": "Debug individual Lua file",
             "luaPath": "",
             "packagePath": [],
             "luaFileExtension": "",
@@ -20,13 +21,25 @@
             "type": "LuaHelper-Debug",
             "request": "launch",
             "name": "LuaHelper-Attach",
-            "description": "通用模式,通常调试项目请选择此模式",
+            "description": "Generic mode for project debugging",
             "cwd": "${workspaceFolder}",
             "luaFileExtension": "",
             "connectionPort": 8818,
             "stopOnEntry": true,
             "useCHook": true,
             "autoPathMode": true
+        },
+        {
+            "type": "LuaHelper-Debug",
+            "request": "launch",
+            "name": "Debug FiveM Lua (standalone)",
+            "luaPath": "lua54",
+            "luaFileExtension": ".lua",
+            "connectionPort": 8818,
+            "stopOnEntry": true,
+            "useCHook": true,
+            "cwd": "${workspaceFolder}",
+            "program": "${file}"
         }
     ]
 }

@@ -2,76 +2,45 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'Strategizing'
-description 'NexusGuard - Advanced AI-powered Anti-Cheat for FiveM'
-version '1.1.0'
+description 'NexusGuard - Modular Anti-Cheat Framework for FiveM'
+version '0.6.9' -- Reflecting framework version
 
-dependency {
-    'oxmysql',
-    'discord_perms'  -- Optional discord permissions integration
+--[[ Dependencies: Ensure these resources are started BEFORE NexusGuard ]]
+dependencies {
+    'oxmysql', -- Required for database features (bans, detections, sessions) and JSON library
+    'screenshot-basic-master' -- Required for screenshot functionality (Config.ScreenCapture.enabled) -- Corrected resource name
 }
 
 shared_scripts {
+    '@ox_lib/init.lua', -- Required for lib.crypto used in default secure token implementation
     'config.lua',
-    'globals.lua',  -- Added this line - load globals before other scripts
-    'shared/utils.lua',
-    'shared/constants.lua',
-    'shared/discord_config.lua'
+    'globals.lua', -- Contains helpers and PLACEHOLDERS requiring user implementation
+    'shared/detector_registry.lua', -- Ensure this is included
+    'shared/event_registry.lua',
+    'shared/version_compat.lua'
+    -- NOTE: config_validator.lua, discord_config.lua, constants.lua are not used/present.
 }
 
 client_scripts {
-    'client/main.lua',
-    'client/detectors/*.lua',
-    'client/networks/*.lua',
-    'client/ml/*.lua',
-    'client/hooks/*.lua',
-    'client/discord/*.lua'
+    'client_main.lua',
+    'client/detectors/*.lua' -- Loads all detector modules
 }
 
 server_scripts {
-    '@oxmysql/lib/MySQL.lua',
-    'server/main.lua',
-    'server/api/*.lua',
-    'server/detectors/*.lua',
-    'server/ml/*.lua',
-    'server/webhooks/*.lua',
-    'server/discord/*.lua',
-    'server/discord/commands/*.lua',
-    'server/discord/events/*.lua',
-    'server/db/*.lua',
-    'server/handlers/*.lua'
+    'server_main.lua'
+    -- NOTE: Discord bot, API, server-side detectors, ML, webhooks, etc., are not implemented in this version.
 }
 
-ui_page 'ui/index.html'
-
 files {
-    'ui/index.html',
-    'ui/css/*.css',
-    'ui/js/*.js',
-    'ui/img/*.png',
-    'ui/img/discord/*.png',
-    'ml_models/*.json',
-    'discord_bot/config.json'
+    'client_main.lua',
+    'server_main.lua',
+    'config.lua',
+    'sql/schema.sql' -- Database schema file
 }
 
 lua54 'yes'
 
 provides {
-    'anticheat',
-    'discord_anticheat',
-    'discord_richpresence'
-}
-
-
----@diagnostic disable: undefined-global
--- The above line tells the Lua language server to ignore undefined global warnings
--- Or you can use:
----@module 'globals'
-
--- In fxmanifest.lua
-client_scripts {
-    'globals.lua', -- Load first
-    'config.lua',
-    'client_main.lua',
-    'client/discord/richpresence.lua',
-    -- other client scripts
+    'anticheat' -- Indicate that this resource provides anticheat functionality
+    -- 'discord_richpresence' -- Rich presence is integrated into client_main, not a separate provided export
 }
